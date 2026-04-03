@@ -9,6 +9,9 @@ import com.mahjongslash.game.model.TileType
 import com.mahjongslash.game.render.ShatterEffect
 import com.mahjongslash.game.render.SlashTrail
 import com.mahjongslash.game.render.SlashTrailPoint
+import com.mahjongslash.ui.theme.AccentGold
+import com.mahjongslash.ui.theme.AccentGoldBright
+import com.mahjongslash.ui.theme.AccentRed
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -16,9 +19,6 @@ import kotlin.random.Random
 /**
  * Core game engine. Manages tile spawning, movement, slash detection,
  * match validation, and score/combo tracking.
- *
- * For Phase 1: simplified spawning with linear movement, basic slash→shatter.
- * Architecture is set up so Phase 2+ additions (patterns, combos, health) slot in cleanly.
  */
 class GameEngine {
     private var nextInstanceId = 0L
@@ -30,6 +30,7 @@ class GameEngine {
     private val tiles = mutableListOf<Tile>()
     private val shatterEffects = mutableListOf<ShatterEffect>()
     private val slashTrails = mutableListOf<SlashTrail>()
+    private val floatingTexts = mutableListOf<FloatingText>()
 
     // Scoring
     private var score = 0
@@ -37,18 +38,21 @@ class GameEngine {
     private var lastMatchTime = 0L
     private var bladeHealth = 3
 
+    // Screen flash
+    private var flashAlpha = 0f
+    private var flashColor = AccentGold
+
     // Spawning
     private var timeSinceLastSpawn = 0f
-    private var spawnInterval = 1.0f  // seconds — tighter for denser play
+    private var spawnInterval = 1.0f
     private var maxTilesOnScreen = 8
     private val rng = Random(System.nanoTime())
 
-    // Matchability: keep a small pool of recent tile types to bias spawns
-    // so players actually see matchable tiles on screen
+    // Matchability pool
     private val recentPool = mutableListOf<TileType>()
-    private val poolSize = 6 // Only draw from this many types at a time
+    private val poolSize = 6
     private var tilesSpawnedFromPool = 0
-    private val poolRefreshInterval = 12 // Refresh pool after this many spawns
+    private val poolRefreshInterval = 12
 
     // Current active slash
     private var activeSlashPoints = mutableListOf<Offset>()
@@ -65,10 +69,12 @@ class GameEngine {
         tiles.clear()
         shatterEffects.clear()
         slashTrails.clear()
+        floatingTexts.clear()
         score = 0
         combo = 0
         bladeHealth = 3
-        timeSinceLastSpawn = spawnInterval // Spawn immediately
+        flashAlpha = 0f
+        timeSinceLastSpawn = spawnInterval
         refreshPool()
         tilesSpawnedFromPool = 0
     }
@@ -104,7 +110,7 @@ class GameEngine {
             }
         }
 
-        // Remove tiles that have left the screen (with margin)
+        // Remove tiles that have left the screen
         val margin = Tile.WIDTH_DP * density * 2
         tiles.removeAll { tile ->
             tile.state == TileState.ALIVE && (
@@ -130,12 +136,20 @@ class GameEngine {
         }
         slashTrails.removeAll { !it.isAlive }
 
+        // Update floating texts
+        for (ft in floatingTexts) {
+            ft.elapsed += dt
+        }
+        floatingTexts.removeAll { !it.isAlive }
+
+        // Decay screen flash
+        if (flashAlpha > 0f) {
+            flashAlpha = (flashAlpha - dt * 3f).coerceAtLeast(0f)
+        }
+
         return snapshot()
     }
 
-    /**
-     * Called when the player starts a swipe.
-     */
     fun onSlashStart(position: Offset) {
         activeSlashPoints.clear()
         activeSlashPoints.add(position)
@@ -145,40 +159,30 @@ class GameEngine {
         }
     }
 
-    /**
-     * Called each frame during a swipe with the current touch position.
-     */
     fun onSlashMove(position: Offset) {
         activeSlashPoints.add(position)
         activeTrail?.points?.add(SlashTrailPoint(position, System.currentTimeMillis()))
         lastSlashPosition = position
     }
 
-    /**
-     * End slash using the last known drag position (for gesture APIs that don't
-     * provide coordinates in onDragEnd).
-     */
     fun onSlashEndAtLastPosition() {
         onSlashEnd(lastSlashPosition)
     }
 
-    /**
-     * Called when the player lifts their finger, completing the swipe.
-     */
     fun onSlashEnd(position: Offset) {
         activeSlashPoints.add(position)
         activeTrail?.points?.add(SlashTrailPoint(position, System.currentTimeMillis()))
         activeTrail?.isFading = true
 
-        // Detect which tiles were slashed
-        val slashed = SlashDetector.detectSlashedTiles(activeSlashPoints, tiles.filter { it.state == TileState.ALIVE }, density)
+        val slashed = SlashDetector.detectSlashedTiles(
+            activeSlashPoints, tiles.filter { it.state == TileState.ALIVE }, density
+        )
 
         if (slashed.isNotEmpty()) {
-            // Find best valid match among slashed tiles
             val matchResult = findBestMatch(slashed)
 
             if (matchResult != null) {
-                // Valid match — shatter matched tiles, award points
+                // Valid match — shatter, score, flash gold
                 for (tile in matchResult.tiles) {
                     tile.state = TileState.SHATTERING
                     shatterEffects.add(ShatterEffect.create(tile, density))
@@ -190,17 +194,51 @@ class GameEngine {
                 val points = (matchResult.baseScore * multiplier).toInt()
                 score += points
 
-                // Mark shattered tiles as dead after a brief delay (handled in update)
+                // Color the trail gold on success
+                activeTrail?.resultColor = AccentGoldBright
+
+                // Floating score popup at centroid of matched tiles
+                val cx = matchResult.tiles.map { it.position.x }.average().toFloat()
+                val cy = matchResult.tiles.map { it.position.y }.average().toFloat()
+                val label = if (combo > 1) {
+                    "+$points ×${comboMultiplierText(combo)}"
+                } else {
+                    "+$points"
+                }
+                floatingTexts.add(FloatingText(
+                    position = Offset(cx, cy),
+                    text = label,
+                    color = AccentGoldBright,
+                ))
+
+                // Screen flash — gold
+                flashAlpha = 0.25f
+                flashColor = AccentGold
+
                 for (tile in matchResult.tiles) {
                     tile.state = TileState.DEAD
                 }
             } else if (slashed.size >= 2) {
-                // Invalid match — tiles don't form a valid group
+                // Invalid match — penalty, flash red
                 combo = 0
                 bladeHealth = (bladeHealth - 1).coerceAtLeast(0)
+
+                // Color the trail red on failure
+                activeTrail?.resultColor = AccentRed
+
+                // Floating penalty text
+                val cx = slashed.map { it.position.x }.average().toFloat()
+                val cy = slashed.map { it.position.y }.average().toFloat()
+                floatingTexts.add(FloatingText(
+                    position = Offset(cx, cy),
+                    text = "MISS",
+                    color = AccentRed,
+                ))
+
+                // Screen flash — red
+                flashAlpha = 0.2f
+                flashColor = AccentRed
             }
-            // Single tile slashed with no match: no penalty in Phase 1
-            // (spec says penalty for single tile, but we'll refine in Phase 3)
         }
 
         activeSlashPoints.clear()
@@ -215,10 +253,14 @@ class GameEngine {
         else -> 3.0f
     }
 
-    /**
-     * Among the slashed tiles, find the highest-scoring valid Mahjong match.
-     * Returns null if no valid match exists.
-     */
+    private fun comboMultiplierText(combo: Int): String = when {
+        combo <= 1 -> "1.0"
+        combo == 2 -> "1.5"
+        combo == 3 -> "2.0"
+        combo == 4 -> "2.5"
+        else -> "3.0"
+    }
+
     private fun findBestMatch(slashed: List<Tile>): MatchResult? {
         val candidates = slashed.filter { it.state == TileState.ALIVE }
         if (candidates.size < 2) return null
@@ -275,17 +317,14 @@ class GameEngine {
     private fun refreshPool() {
         recentPool.clear()
         val shuffled = TileSet.allTypes.shuffled(rng)
-        // Pick poolSize types, biased toward suited tiles for sequence potential
         recentPool.addAll(shuffled.take(poolSize))
     }
 
     private fun pickTileType(): TileType {
         tilesSpawnedFromPool++
         if (tilesSpawnedFromPool > poolRefreshInterval) {
-            // Keep ~half the pool for continuity, replace the rest
             val keep = recentPool.take(poolSize / 2)
             refreshPool()
-            // Ensure kept types are in the new pool
             for (t in keep) {
                 if (t !in recentPool && recentPool.size < poolSize) recentPool.add(t)
             }
@@ -294,20 +333,15 @@ class GameEngine {
         return recentPool[rng.nextInt(recentPool.size)]
     }
 
-    /**
-     * Spawn a new tile from a random screen edge with a velocity toward the play area.
-     */
     private fun spawnTile() {
         val tileType = pickTileType()
         val tileW = Tile.WIDTH_DP * density
         val tileH = Tile.HEIGHT_DP * density
 
-        // Choose spawn edge: 0=left, 1=right, 2=top, 3=bottom
         val edge = rng.nextInt(4)
-        val baseSpeed = 80f + rng.nextFloat() * 60f // dp/s — gentle Phase 1 speed
+        val baseSpeed = 80f + rng.nextFloat() * 60f
         val speed = baseSpeed * density
 
-        // Inset play area to avoid system bars (status bar ~48dp, nav bar ~48dp)
         val topInset = 60f * density
         val bottomInset = 60f * density
         val playTop = topInset + tileH
@@ -315,27 +349,27 @@ class GameEngine {
         val playHeight = playBottom - playTop
 
         val (startPos, vel) = when (edge) {
-            0 -> { // Left edge
+            0 -> {
                 val y = playTop + rng.nextFloat() * playHeight
                 val angle = -30f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(-tileW, y) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
-            1 -> { // Right edge
+            1 -> {
                 val y = playTop + rng.nextFloat() * playHeight
                 val angle = 150f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(screenW + tileW, y) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
-            2 -> { // Top edge
+            2 -> {
                 val x = tileW + rng.nextFloat() * (screenW - tileW * 2)
                 val angle = 60f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(x, -tileH) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
-            else -> { // Bottom edge
+            else -> {
                 val x = tileW + rng.nextFloat() * (screenW - tileW * 2)
-                val angle = -120f + rng.nextFloat() * 60f // heading upward (-120° to -60°)
+                val angle = -120f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(x, screenH + tileH) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
@@ -356,12 +390,15 @@ class GameEngine {
         tiles = tiles.filter { it.state == TileState.ALIVE }.toList(),
         shatterEffects = shatterEffects.toList(),
         slashTrails = slashTrails.toList(),
+        floatingTexts = floatingTexts.toList(),
         score = score,
         combo = combo,
         bladeHealth = bladeHealth,
         phase = if (bladeHealth <= 0) GamePhase.GAME_OVER else GamePhase.PLAYING,
         screenWidth = screenW,
         screenHeight = screenH,
+        flashAlpha = flashAlpha,
+        flashColor = flashColor,
     )
 }
 

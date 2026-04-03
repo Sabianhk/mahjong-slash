@@ -16,4 +16,5 @@ val AccentGoldBright = Color(0xFFDCB44E)
 val InkBlack = Color(0xFF2C2419)
 val InkGrey = Color(0xFF6B5D4F)
 val WarmWhite = Color(0xFFE8DCC8)
-val SlashTrailColor = Color(0xFF2C2419)
+val SlashTrailColor = Color(0xFFF2E8D5) // Bright ivory — visible on dark background
+val SlashGlowColor = Color(0xFFC49B40)  // Gold glow for active slash

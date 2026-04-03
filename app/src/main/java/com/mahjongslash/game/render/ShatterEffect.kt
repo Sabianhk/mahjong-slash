@@ -7,8 +7,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import com.mahjongslash.game.model.Tile
+import com.mahjongslash.ui.theme.AccentGold
 import com.mahjongslash.ui.theme.TileEdge
 import com.mahjongslash.ui.theme.TileIvory
+import com.mahjongslash.ui.theme.WarmWhite
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -30,12 +32,12 @@ data class ShatterFragment(
 data class ShatterEffect(
     val fragments: List<ShatterFragment>,
     var elapsed: Float = 0f,
-    val duration: Float = 0.8f, // seconds
+    val duration: Float = 1.0f, // seconds — slightly longer for visibility
 ) {
     val isAlive: Boolean get() = elapsed < duration
 
     companion object {
-        private val GRAVITY = 800f // px/s²
+        private val GRAVITY = 600f // px/s² — slower fall so fragments stay visible longer
 
         fun create(tile: Tile, density: Float): ShatterEffect {
             val rng = Random(tile.instanceId)
@@ -44,23 +46,32 @@ data class ShatterEffect(
             val cx = tile.position.x
             val cy = tile.position.y
 
-            val fragments = (0 until 8).map { i ->
-                // Distribute fragments around the tile center
-                val angle = (i * 45f + rng.nextFloat() * 30f - 15f) * (Math.PI.toFloat() / 180f)
-                val speed = 200f + rng.nextFloat() * 300f
-                val fragW = w * (0.2f + rng.nextFloat() * 0.3f)
-                val fragH = h * (0.15f + rng.nextFloat() * 0.25f)
+            val fragmentCount = 12 // More fragments for dramatic burst
+            val fragments = (0 until fragmentCount).map { i ->
+                val angle = (i * (360f / fragmentCount) + rng.nextFloat() * 20f - 10f) *
+                    (Math.PI.toFloat() / 180f)
+                val speed = 250f + rng.nextFloat() * 400f
+                val fragW = w * (0.2f + rng.nextFloat() * 0.35f)
+                val fragH = h * (0.15f + rng.nextFloat() * 0.3f)
+
+                val r = rng.nextFloat()
+                val color = when {
+                    r < 0.2f -> AccentGold   // Gold sparks for flair
+                    r < 0.4f -> WarmWhite    // Bright white pieces
+                    r < 0.7f -> TileIvory    // Standard ivory
+                    else -> TileEdge         // Edge color
+                }
 
                 ShatterFragment(
                     position = Offset(
                         cx + cos(angle) * w * 0.2f,
                         cy + sin(angle) * h * 0.2f
                     ),
-                    velocity = Offset(cos(angle) * speed, sin(angle) * speed - 150f),
+                    velocity = Offset(cos(angle) * speed, sin(angle) * speed - 200f),
                     rotation = rng.nextFloat() * 360f,
                     rotationSpeed = (rng.nextFloat() - 0.5f) * 720f,
                     size = Size(fragW, fragH),
-                    color = if (rng.nextFloat() > 0.3f) TileIvory else TileEdge,
+                    color = color,
                 )
             }
             return ShatterEffect(fragments)
