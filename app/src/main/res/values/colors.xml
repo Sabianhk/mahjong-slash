@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background_dark">#FF1A1714</color>
+    <color name="tile_ivory">#FFF2E8D5</color>
+    <color name="tile_edge">#FFC4B49A</color>
+    <color name="accent_red">#FFB44033</color>
+    <color name="accent_gold">#FFC49B40</color>
+</resources>

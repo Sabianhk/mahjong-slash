@@ -1,0 +1,37 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# OS / editor junk
+*.swp
+*.swo
+.vscode/
+
+# Android / Java
+**/build/
+*.class
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Claude / local agent state
+.claude/projects/
+.claude/cache/
+.claude/tmp/
+
+# Optional machine-local overrides
+.claude/settings.local.json
