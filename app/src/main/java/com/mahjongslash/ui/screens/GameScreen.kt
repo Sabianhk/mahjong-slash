@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -177,19 +178,29 @@ private fun GameHud(state: GameState, modifier: Modifier = Modifier) {
             }
         }
 
-        // Top-right: Blade health
+        // Top-right: Blade health (drawn as small tile shapes)
         Row(modifier = Modifier.align(Alignment.TopEnd)) {
             for (i in 0 until 3) {
                 val isAlive = i < state.bladeHealth
-                Text(
-                    text = if (isAlive) "▮" else "▯",
-                    style = TextStyle(
-                        color = if (isAlive) TileIvory else InkGrey.copy(alpha = 0.3f),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                )
-                if (i < 2) Spacer(modifier = Modifier.width(4.dp))
+                Canvas(
+                    modifier = Modifier
+                        .width(12.dp)
+                        .height(18.dp)
+                        .padding(horizontal = 2.dp)
+                ) {
+                    if (isAlive) {
+                        drawRoundRect(
+                            color = TileIvory,
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
+                        )
+                    } else {
+                        drawRoundRect(
+                            color = InkGrey.copy(alpha = 0.25f),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f),
+                        )
+                    }
+                }
             }
         }
     }

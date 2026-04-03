@@ -39,9 +39,16 @@ class GameEngine {
 
     // Spawning
     private var timeSinceLastSpawn = 0f
-    private var spawnInterval = 2.0f  // seconds — Phase 1 default
-    private var maxTilesOnScreen = 6
+    private var spawnInterval = 1.0f  // seconds — tighter for denser play
+    private var maxTilesOnScreen = 8
     private val rng = Random(System.nanoTime())
+
+    // Matchability: keep a small pool of recent tile types to bias spawns
+    // so players actually see matchable tiles on screen
+    private val recentPool = mutableListOf<TileType>()
+    private val poolSize = 6 // Only draw from this many types at a time
+    private var tilesSpawnedFromPool = 0
+    private val poolRefreshInterval = 12 // Refresh pool after this many spawns
 
     // Current active slash
     private var activeSlashPoints = mutableListOf<Offset>()
@@ -62,6 +69,8 @@ class GameEngine {
         combo = 0
         bladeHealth = 3
         timeSinceLastSpawn = spawnInterval // Spawn immediately
+        refreshPool()
+        tilesSpawnedFromPool = 0
     }
 
     /**
@@ -263,11 +272,33 @@ class GameEngine {
         return best
     }
 
+    private fun refreshPool() {
+        recentPool.clear()
+        val shuffled = TileSet.allTypes.shuffled(rng)
+        // Pick poolSize types, biased toward suited tiles for sequence potential
+        recentPool.addAll(shuffled.take(poolSize))
+    }
+
+    private fun pickTileType(): TileType {
+        tilesSpawnedFromPool++
+        if (tilesSpawnedFromPool > poolRefreshInterval) {
+            // Keep ~half the pool for continuity, replace the rest
+            val keep = recentPool.take(poolSize / 2)
+            refreshPool()
+            // Ensure kept types are in the new pool
+            for (t in keep) {
+                if (t !in recentPool && recentPool.size < poolSize) recentPool.add(t)
+            }
+            tilesSpawnedFromPool = 0
+        }
+        return recentPool[rng.nextInt(recentPool.size)]
+    }
+
     /**
      * Spawn a new tile from a random screen edge with a velocity toward the play area.
      */
     private fun spawnTile() {
-        val tileType = TileSet.allTypes[rng.nextInt(TileSet.allTypes.size)]
+        val tileType = pickTileType()
         val tileW = Tile.WIDTH_DP * density
         val tileH = Tile.HEIGHT_DP * density
 
@@ -276,28 +307,35 @@ class GameEngine {
         val baseSpeed = 80f + rng.nextFloat() * 60f // dp/s — gentle Phase 1 speed
         val speed = baseSpeed * density
 
+        // Inset play area to avoid system bars (status bar ~48dp, nav bar ~48dp)
+        val topInset = 60f * density
+        val bottomInset = 60f * density
+        val playTop = topInset + tileH
+        val playBottom = screenH - bottomInset - tileH
+        val playHeight = playBottom - playTop
+
         val (startPos, vel) = when (edge) {
             0 -> { // Left edge
-                val y = tileH + rng.nextFloat() * (screenH - tileH * 2)
-                val angle = -30f + rng.nextFloat() * 60f // -30° to +30° from horizontal right
+                val y = playTop + rng.nextFloat() * playHeight
+                val angle = -30f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(-tileW, y) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
             1 -> { // Right edge
-                val y = tileH + rng.nextFloat() * (screenH - tileH * 2)
-                val angle = 150f + rng.nextFloat() * 60f // heading left
+                val y = playTop + rng.nextFloat() * playHeight
+                val angle = 150f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(screenW + tileW, y) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
             2 -> { // Top edge
                 val x = tileW + rng.nextFloat() * (screenW - tileW * 2)
-                val angle = 60f + rng.nextFloat() * 60f // heading downward
+                val angle = 60f + rng.nextFloat() * 60f
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(x, -tileH) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
             else -> { // Bottom edge
                 val x = tileW + rng.nextFloat() * (screenW - tileW * 2)
-                val angle = -60f + rng.nextFloat() * -60f // heading upward
+                val angle = -120f + rng.nextFloat() * 60f // heading upward (-120° to -60°)
                 val rad = Math.toRadians(angle.toDouble()).toFloat()
                 Offset(x, screenH + tileH) to Offset(cos(rad) * speed, sin(rad) * speed)
             }
