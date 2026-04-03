@@ -6,7 +6,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,12 +25,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mahjongslash.game.engine.FloatingText
 import com.mahjongslash.game.engine.GamePhase
 import com.mahjongslash.game.engine.GameState
 import com.mahjongslash.game.render.TileRenderer.drawTile
@@ -55,7 +55,7 @@ fun GameScreen(
         while (true) {
             val frameTime = withFrameNanos { it }
             val dt = ((frameTime - lastFrameTime) / 1_000_000_000.0).toFloat()
-                .coerceAtMost(0.05f) // Cap at 50ms to prevent physics explosions
+                .coerceAtMost(0.05f)
             lastFrameTime = frameTime
             viewModel.update(dt)
         }
@@ -95,7 +95,7 @@ fun GameScreen(
                     )
                 }
         ) {
-            // Draw rice paper grain texture (subtle noise effect)
+            // Draw rice paper grain texture
             drawBackground()
 
             // Draw slash trails (behind tiles)
@@ -108,9 +108,21 @@ fun GameScreen(
                 drawTile(tile, textMeasurer)
             }
 
-            // Draw shatter effects (on top)
+            // Draw shatter effects (on top of tiles)
             for (effect in state.shatterEffects) {
                 drawShatterEffect(effect)
+            }
+
+            // Draw floating score/feedback texts
+            for (ft in state.floatingTexts) {
+                drawFloatingText(ft, textMeasurer)
+            }
+
+            // Draw screen flash overlay
+            if (state.flashAlpha > 0f) {
+                drawRect(
+                    color = state.flashColor.copy(alpha = state.flashAlpha),
+                )
             }
         }
 
@@ -130,11 +142,8 @@ fun GameScreen(
 }
 
 private fun DrawScope.drawBackground() {
-    // Base background
     drawRect(BackgroundDark)
 
-    // Subtle rice paper grain — draw a few semi-transparent dots for texture
-    // In production this would be a texture bitmap, but for Phase 1 we keep it clean
     val grainColor = TileIvory.copy(alpha = 0.015f)
     val step = 12f * density
     var y = 0f
@@ -150,6 +159,29 @@ private fun DrawScope.drawBackground() {
         }
         y += step
     }
+}
+
+private fun DrawScope.drawFloatingText(
+    ft: FloatingText,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer
+) {
+    if (ft.alpha <= 0f) return
+
+    val style = TextStyle(
+        color = ft.color.copy(alpha = ft.alpha),
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.sp,
+    )
+
+    val layoutResult = textMeasurer.measure(ft.text, style)
+    val x = ft.position.x - layoutResult.size.width / 2f
+    val y = ft.position.y + ft.driftY - layoutResult.size.height / 2f
+
+    drawText(
+        textLayoutResult = layoutResult,
+        topLeft = Offset(x, y),
+    )
 }
 
 @Composable
@@ -213,7 +245,6 @@ private fun GameOverOverlay(score: Int, onRestart: () -> Unit) {
             .fillMaxSize()
             .background(BackgroundDark.copy(alpha = 0.85f))
             .pointerInput(Unit) {
-                // Tap to restart
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
