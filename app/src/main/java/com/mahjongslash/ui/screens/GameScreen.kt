@@ -20,7 +20,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -106,6 +108,47 @@ fun GameScreen(
             // Draw live tiles
             for (tile in state.tiles) {
                 drawTile(tile, textMeasurer)
+            }
+
+            // DEBUG: Draw tile hitbox outlines (temporary — remove after validation)
+            val dbgDensity = state.debugDensity
+            for (tile in state.tiles) {
+                val hb = tile.hitBounds(dbgDensity)
+                drawRect(
+                    color = Color.Cyan.copy(alpha = 0.4f),
+                    topLeft = Offset(hb.left, hb.top),
+                    size = androidx.compose.ui.geometry.Size(hb.width, hb.height),
+                    style = Stroke(width = 2f)
+                )
+                // Tile center marker
+                drawCircle(
+                    color = Color.Cyan.copy(alpha = 0.7f),
+                    radius = 4f,
+                    center = tile.position,
+                )
+            }
+
+            // DEBUG: Draw last swipe path (temporary — remove after validation)
+            if (state.debugLastPath.size >= 2) {
+                for (i in 0 until state.debugLastPath.size - 1) {
+                    drawLine(
+                        color = Color.Yellow.copy(alpha = 0.8f),
+                        start = state.debugLastPath[i],
+                        end = state.debugLastPath[i + 1],
+                        strokeWidth = 3f,
+                    )
+                }
+                // Mark start and end points
+                drawCircle(
+                    color = Color.Green,
+                    radius = 8f,
+                    center = state.debugLastPath.first(),
+                )
+                drawCircle(
+                    color = Color.Red,
+                    radius = 8f,
+                    center = state.debugLastPath.last(),
+                )
             }
 
             // Draw shatter effects (on top of tiles)

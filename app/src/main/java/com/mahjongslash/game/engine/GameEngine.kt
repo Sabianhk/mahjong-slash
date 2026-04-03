@@ -71,6 +71,7 @@ class GameEngine {
 
     // Debug (temporary — remove after validation)
     private var debugLastSlash = ""
+    private var debugLastPath = listOf<Offset>()
 
     fun initialize(width: Float, height: Float, density: Float) {
         screenW = width
@@ -202,9 +203,40 @@ class GameEngine {
         val slashed = slashResult.tiles
 
         // Debug diagnostics (temporary — remove after validation)
-        val aliveTileCount = tiles.count { it.state == TileState.ALIVE }
+        val aliveTiles = tiles.filter { it.state == TileState.ALIVE }
+        val aliveTileCount = aliveTiles.size
+        debugLastPath = activeSlashPoints.toList()
+
+        // Build detailed debug: path bounds vs tile bounds
+        val pathXs = activeSlashPoints.map { it.x }
+        val pathYs = activeSlashPoints.map { it.y }
+        val pathBounds = if (pathXs.isNotEmpty())
+            "px[${pathXs.min().toInt()}..${pathXs.max().toInt()}]" +
+            "py[${pathYs.min().toInt()}..${pathYs.max().toInt()}]"
+        else "nopath"
+
+        val tileInfo = if (aliveTiles.isNotEmpty()) {
+            val txs = aliveTiles.map { it.position.x }
+            val tys = aliveTiles.map { it.position.y }
+            "tx[${txs.min().toInt()}..${txs.max().toInt()}]" +
+            "ty[${tys.min().toInt()}..${tys.max().toInt()}]"
+        } else "notiles"
+
+        // Find nearest tile distance to any path point for miss diagnosis
+        var nearestDist = Float.MAX_VALUE
+        for (pt in activeSlashPoints) {
+            for (tile in aliveTiles) {
+                val dx = pt.x - tile.position.x
+                val dy = pt.y - tile.position.y
+                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                if (dist < nearestDist) nearestDist = dist
+            }
+        }
+        val nearStr = if (nearestDist < Float.MAX_VALUE) "near=${nearestDist.toInt()}px" else ""
+
         debugLastSlash = "len=${slashResult.lengthDp.toInt()}dp pts=${slashResult.pointCount} " +
-            "hit=${slashed.size}/${aliveTileCount} st=${slashResult.status}"
+            "hit=${slashed.size}/${aliveTileCount} st=${slashResult.status}\n" +
+            "$pathBounds $tileInfo $nearStr d=${density}"
 
         if (slashed.isNotEmpty()) {
             val matchResult = findBestMatch(slashed)
@@ -470,6 +502,8 @@ class GameEngine {
         flashAlpha = flashAlpha,
         flashColor = flashColor,
         debugLastSlash = debugLastSlash,
+        debugLastPath = debugLastPath,
+        debugDensity = density,
     )
 }
 

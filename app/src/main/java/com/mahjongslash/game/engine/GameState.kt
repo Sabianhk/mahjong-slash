@@ -25,6 +25,10 @@ data class GameState(
     val flashColor: Color = Color.Transparent,
     /** Debug: last slash diagnostics (temporary — remove after validation) */
     val debugLastSlash: String = "",
+    /** Debug: last swipe path for visual overlay (temporary) */
+    val debugLastPath: List<Offset> = emptyList(),
+    /** Debug: density used by engine (temporary) */
+    val debugDensity: Float = 1f,
 )
 
 enum class GamePhase {
