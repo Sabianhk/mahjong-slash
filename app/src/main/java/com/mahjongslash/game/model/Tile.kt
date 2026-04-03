@@ -15,6 +15,7 @@ data class Tile(
     val spawnTime: Long,
     var state: TileState = TileState.ALIVE,
     var alpha: Float = 1f,
+    var shatterElapsed: Float = 0f,
 ) {
     companion object {
         /** Tile dimensions in dp — will be converted to px at render time */

@@ -23,6 +23,8 @@ data class GameState(
     /** Screen flash: color with alpha, decays each frame */
     val flashAlpha: Float = 0f,
     val flashColor: Color = Color.Transparent,
+    /** Debug: last slash diagnostics (temporary — remove after validation) */
+    val debugLastSlash: String = "",
 )
 
 enum class GamePhase {

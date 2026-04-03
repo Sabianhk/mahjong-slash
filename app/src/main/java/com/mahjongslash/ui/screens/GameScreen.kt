@@ -129,6 +129,21 @@ fun GameScreen(
         // HUD overlay
         GameHud(state = state, modifier = Modifier.statusBarsPadding())
 
+        // Debug overlay (temporary — remove after validation)
+        if (state.debugLastSlash.isNotEmpty()) {
+            Text(
+                text = state.debugLastSlash,
+                style = TextStyle(
+                    color = WarmWhite.copy(alpha = 0.5f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+            )
+        }
+
         // Game over overlay
         if (state.phase == GamePhase.GAME_OVER) {
             GameOverOverlay(

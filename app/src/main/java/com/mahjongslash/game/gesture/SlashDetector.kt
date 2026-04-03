@@ -9,29 +9,31 @@ import kotlin.math.sqrt
  * Detects slash gestures and determines which tiles are intersected.
  *
  * A valid slash requires:
- * - Minimum path length of 100dp (prevents accidental taps)
+ * - Minimum path length of 40dp (prevents accidental taps)
  * - Touch down → drag → touch up
  *
  * Hit testing uses expanded tile bounds (+ 8dp padding for forgiveness).
  */
 object SlashDetector {
 
-    private const val MIN_SLASH_LENGTH_DP = 100f
+    private const val MIN_SLASH_LENGTH_DP = 40f
 
     /**
      * Given a list of swipe path points and the active tiles,
-     * returns the set of tiles whose hit bounds were crossed by the swipe path.
+     * returns a SlashResult with the tiles hit and debug diagnostics.
      */
     fun detectSlashedTiles(
         pathPoints: List<Offset>,
         tiles: List<Tile>,
         density: Float
-    ): List<Tile> {
-        if (pathPoints.size < 2) return emptyList()
+    ): SlashResult {
+        if (pathPoints.size < 2) return SlashResult(emptyList(), 0f, pathPoints.size, "no_path")
 
         // Check minimum path length
         val totalLength = pathLength(pathPoints) / density
-        if (totalLength < MIN_SLASH_LENGTH_DP) return emptyList()
+        if (totalLength < MIN_SLASH_LENGTH_DP) return SlashResult(
+            emptyList(), totalLength, pathPoints.size, "too_short"
+        )
 
         val slashed = mutableSetOf<Long>()
         val result = mutableListOf<Tile>()
@@ -51,8 +53,15 @@ object SlashDetector {
             }
         }
 
-        return result
+        return SlashResult(result, totalLength, pathPoints.size, "ok")
     }
+
+    data class SlashResult(
+        val tiles: List<Tile>,
+        val lengthDp: Float,
+        val pointCount: Int,
+        val status: String, // "ok", "too_short", "no_path"
+    )
 
     private fun pathLength(points: List<Offset>): Float {
         var length = 0f
