@@ -16,7 +16,7 @@ data class GameState(
     val floatingTexts: List<FloatingText> = emptyList(),
     val score: Int = 0,
     val combo: Int = 0,
-    val bladeHealth: Int = 3,
+    val bladeHealth: Int = 5,
     val phase: GamePhase = GamePhase.PLAYING,
     val screenWidth: Float = 0f,
     val screenHeight: Float = 0f,
@@ -29,6 +29,8 @@ data class GameState(
     val debugLastPath: List<Offset> = emptyList(),
     /** Debug: density used by engine (temporary) */
     val debugDensity: Float = 1f,
+    /** Debug: auto-slash result (temporary) */
+    val debugAutoSlash: String = "",
 )
 
 enum class GamePhase {

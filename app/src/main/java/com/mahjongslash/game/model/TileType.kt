@@ -24,6 +24,9 @@ data class TileType(
 
     /** Can this tile form a sequence with others? Only suited tiles can. */
     val canSequence: Boolean get() = isSuited
+
+    /** Short debug display name, e.g. "三萬" or "中" */
+    val displayName: String get() = "$face$label"
 }
 
 object TileSet {

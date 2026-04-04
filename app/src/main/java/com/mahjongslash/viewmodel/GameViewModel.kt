@@ -36,4 +36,6 @@ class GameViewModel : ViewModel() {
         engine.initialize(width, height, density)
         initialized = true
     }
+
+    fun triggerAutoSlash(): String = engine.triggerAutoSlash()
 }

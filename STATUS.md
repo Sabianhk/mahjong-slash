@@ -1,40 +1,68 @@
-# Mahjong Slash (切牌) — Build Status
+# Mahjong Slash (切牌) — Status
 
-## Current State: Phase 1 Complete
+## Current State: Gameplay feel overhaul landed, ready for validation
 
-### What's Done
+### What just changed (2026-04-04)
 
-**Phase 1 — Scaffold + Proof of Life**
+**Gameplay feel rescue** — five targeted changes to address the "choppy / random / not fun" feedback:
 
-- Android project scaffold (Gradle 8.11.1, AGP 8.7.3, Kotlin 2.1.0, Compose BOM 2024.12)
-- Package structure: `com.mahjongslash.{game,ui,viewmodel}`
-- **Tile model**: All 34 Mahjong tile types (Characters, Dots, Bamboo, Winds, Dragons) with Chinese characters
-- **Tile rendering**: 3D-look tiles drawn on Compose Canvas — ivory face, depth edge, warm shadow, engraved symbols with suit-specific colors, subtle gloss highlight
-- **Tile spawning**: Tiles spawn from all 4 screen edges with randomized entry angles and gentle speed
-- **Swipe detection**: Drag gesture → path sampling → Liang-Barsky line-rect intersection against tile hit bounds (with 8dp forgiveness padding)
-- **Match validation**: Pair (2 identical = 100pts), Sequence (3 consecutive same suit = 200pts), Triplet (3 identical = 350pts). Finds highest-scoring valid subset from slashed tiles
-- **Shatter effect**: 8-fragment explosion with physics (velocity, gravity, rotation, fade)
-- **Slash trail**: Calligraphy brush stroke effect — ink-black path with smooth bezier curves, outer glow, inner highlight, fade-out
-- **Combo system**: Consecutive matches within 3s increment combo (×1.0 → ×3.0 multiplier)
-- **Blade health**: 3 health points, lost on invalid slash. Game over when 0
-- **HUD**: Score (gold), combo multiplier (red), blade health indicators
-- **Game over**: Overlay with 終 character, final score, tap-to-restart
-- **Ink & Ivory theme**: Dark warm background (#1A1714), ivory tiles, accent red/gold, no Material Design components
-- **Rice paper grain**: Subtle dot texture on background
+1. **Slower floating tiles** — base speed reduced from 55-100 dp/s to 30-50 dp/s. Tiles now decelerate gently over time (to ~70% speed) and wobble sinusoidally perpendicular to their path. This creates a "floating on water" feel instead of mechanical straight-line zipping.
 
-### What Remains
+2. **Wave/burst spawning** — 60% of spawns now come as matchable groups (2-3 tiles) from the same edge, 150-300ms apart. Pairs and sequences cluster naturally on screen, giving the player obvious slash targets instead of scattered random tiles.
 
-**Phase 2 — Tile System + Match Logic** (partially done — match logic is in, needs full symbol rendering polish, more movement patterns)
+3. **More tiles, faster rhythm** — max tiles raised to 12 (was 8), spawn interval shortened to 0.7s (was 1.0s). Combined with slower movement, this means more tiles on screen at once and more match opportunities.
 
-**Phase 3 — Game Loop + HUD** (partially done — core loop works, needs difficulty scaling, health tile visuals)
+4. **More forgiving** — blade health raised to 5 (was 3). Penalty only triggers on 3+ non-matching tiles slashed (was 2+). Slashing through 1-2 random tiles no longer costs a life, encouraging bolder play.
 
-**Phase 4 — Menus + Navigation**: Splash, main menu, mode select, pause, results, settings screens
+5. **Auto-slash dev helper** — "AUTO" button in bottom-right corner finds the best available match on screen and executes a synthetic slash through it. Shows debug text with what matched, current score, combo, and health. This validates the full pipeline (hit detection → match validation → shatter → scoring) without needing manual targeting.
 
-**Phase 5 — Remaining Modes + Power-Ups**: Time Attack, Zen, Challenge modes. Gold Lacquer, Slow Ink, Reveal power-ups. Audio trigger system
+### Verified working
 
-**Phase 6 — Progression + Persistence**: Room DB, player profile, collection, shop, leaderboards, ranks
+- Android project builds successfully on the MacBook emulator and launches reliably.
+- Canonical repo is active and synced through GitHub.
+- Core architecture is in place: engine, model, renderer, gesture layer, Compose UI.
+- Tiles render correctly on screen and HUD is visible.
+- Debug instrumentation is in the app (hitboxes, swipe path, diagnostics).
+- Cyan hitboxes visually align with tiles (verified from screenshots).
 
-**Phase 7 — Polish + Store Prep**: Visual polish, app icon, feature graphic, ProGuard, signed .aab
+### What to test next
+
+**Priority 1: Build and run on emulator, tap the AUTO button**
+- Does the auto-slash find and execute matches?
+- Does the score increase? Does the shatter effect play?
+- Does the debug text at bottom-left show the match details?
+- If it says "no match" — are the on-screen tiles actually non-matching?
+
+**Priority 2: Manual slash feel**
+- Do tiles feel like they float/drift instead of zip?
+- Do matchable groups arrive together and cluster?
+- Is it easier to find and slash matching pairs?
+- Does the wobble motion look natural, not jittery?
+
+**Priority 3: Overall game feel**
+- Is the pacing better (more tiles, more chances)?
+- Is the forgiveness better (5 lives, less punishing)?
+- Does the game last longer and feel more playable?
+
+### Important recent commits
+
+- `11d19c3` — `debug: visualize swipe path and tile hitboxes`
+- `8ac2649` — `fix: improve slash detection and match feedback loop`
+- `0451908` — `feat: surface gameplay feedback overlays`
+- `8d3e386` — `fix: strengthen slash feedback and effect visibility`
+- `eb135b8` — `fix: improve initial game layout and HUD rendering`
+
+### Honest assessment
+
+The core architecture is sound. Hit detection works (proven by hitbox alignment). The previous "broken" results were from poorly-targeted automated swipes. The gameplay feel changes above are the first real pass at making the game enjoyable. The auto-slash button is the key validation tool — it should prove the full match pipeline works in one tap.
+
+## Working model / environment
+
+- GitHub = source of truth
+- VPS = orchestration / repo control / agent coordination
+- MacBook = real Android build + emulator machine
+- Project root on VPS: `/root/.openclaw/workspace/projects/mahjong-slash`
+- Project root on Mac: `/Users/stanley/mahjong-slash`
 
 ## How to Build & Run
 
@@ -55,22 +83,22 @@ mahjong-slash/
 ├── build.gradle.kts          # Root build config
 ├── settings.gradle.kts       # Module + repo config
 ├── gradle.properties         # JVM args, AndroidX
-├── app/
+├─�� app/
 │   ├── build.gradle.kts      # App module config
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/com/mahjongslash/
 │       │   ├── MainActivity.kt
 │       │   ├── viewmodel/GameViewModel.kt
-│       │   ├── ui/
-│       │   │   ├── theme/{Color,Theme}.kt
+��       │   ├── ui/
+│       │   ��   ├── theme/{Color,Theme}.kt
 │       │   │   └── screens/GameScreen.kt
-│       │   └── game/
-│       │       ├── model/{Tile,TileType}.kt
+��       │   └── game/
+│       │       ├─�� model/{Tile,TileType}.kt
 │       │       ├── engine/{GameState,GameEngine}.kt
 │       │       ├── render/{TileRenderer,ShatterEffect,SlashTrail}.kt
-│       │       └── gesture/SlashDetector.kt
-│       └── res/
+��       │       └── gesture/SlashDetector.kt
+│       └��─ res/
 │           ├── values/{strings,colors,themes}.xml
 │           └── drawable/ic_launcher_foreground.xml
 └── docs/build-prompt.md      # Full game spec
@@ -81,7 +109,8 @@ mahjong-slash/
 - **No game engine dependency** — pure Compose Canvas + frame-driven update loop
 - **GameEngine** is the single source of truth. It owns all mutable state and exposes immutable snapshots via `GameState`
 - **ViewModel** bridges the engine to Compose, exposing `StateFlow<GameState>`
-- **TileRenderer** draws tiles with layered Canvas operations (shadow → edge → face → symbol → gloss)
+- **TileRenderer** draws tiles with layered Canvas operations (shadow -> edge -> face -> symbol -> gloss)
 - **SlashDetector** uses Liang-Barsky line clipping for efficient swipe-to-tile intersection
 - **ShatterEffect** is a simple particle system with per-fragment physics
+- **Wave spawning** groups matchable tiles in bursts from nearby edges for natural clustering
 - The architecture cleanly separates model/engine/render/gesture so later phases slot in without restructuring

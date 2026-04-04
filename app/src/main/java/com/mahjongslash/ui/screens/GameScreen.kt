@@ -2,6 +2,7 @@ package com.mahjongslash.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -173,17 +174,48 @@ fun GameScreen(
         GameHud(state = state, modifier = Modifier.statusBarsPadding())
 
         // Debug overlay (temporary — remove after validation)
-        if (state.debugLastSlash.isNotEmpty()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp)
+        ) {
+            if (state.debugAutoSlash.isNotEmpty()) {
+                Text(
+                    text = state.debugAutoSlash,
+                    style = TextStyle(
+                        color = AccentGold.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                )
+            }
+            if (state.debugLastSlash.isNotEmpty()) {
+                Text(
+                    text = state.debugLastSlash,
+                    style = TextStyle(
+                        color = WarmWhite.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                )
+            }
+        }
+
+        // Auto-slash debug button (temporary — remove after validation)
+        if (state.phase == GamePhase.PLAYING) {
             Text(
-                text = state.debugLastSlash,
+                text = "⚡AUTO",
                 style = TextStyle(
-                    color = WarmWhite.copy(alpha = 0.5f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Normal,
+                    color = AccentGold.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
                 ),
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp)
+                    .clickable { viewModel.triggerAutoSlash() }
+                    .background(BackgroundDark.copy(alpha = 0.6f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
 
@@ -270,7 +302,7 @@ private fun GameHud(state: GameState, modifier: Modifier = Modifier) {
 
         // Top-right: Blade health (drawn as small tile shapes)
         Row(modifier = Modifier.align(Alignment.TopEnd)) {
-            for (i in 0 until 3) {
+            for (i in 0 until 5) {
                 val isAlive = i < state.bladeHealth
                 Canvas(
                     modifier = Modifier
