@@ -584,58 +584,70 @@ class GameEngine {
     }
 
     /**
-     * DEV HELPER: Finds the best available match on screen and auto-slashes through it.
-     * Simulates a gesture path through the matched tiles' positions.
+     * DEV HELPER: Finds the best available match on screen and applies it directly.
+     * Bypasses slash gesture detection entirely — directly shatters matched tiles,
+     * updates score, and creates visual effects. This guarantees reliable activation
+     * from emulator automation or auto-trigger.
      * Returns a description of what happened for debug display.
      */
     fun triggerAutoSlash(): String {
-        val alive = tiles.filter { it.state == TileState.ALIVE }
-        if (alive.size < 2) {
-            autoSlashResult = "AUTO: no tiles (${alive.size} alive)"
+        if (screenW == 0f) {
+            autoSlashResult = "AUTO: not initialized"
             return autoSlashResult
         }
 
-        // Try to find the best match among all alive tiles
+        val alive = tiles.filter { it.state == TileState.ALIVE }
+        if (alive.size < 2) {
+            autoSlashResult = "AUTO: waiting (${alive.size} tiles)"
+            return autoSlashResult
+        }
+
         val bestMatch = findBestMatch(alive)
         if (bestMatch == null) {
-            // List what's on screen for diagnosis
-            val types = alive.map { "${it.type.displayName}" }.joinToString(", ")
+            val types = alive.map { it.type.displayName }.joinToString(", ")
             autoSlashResult = "AUTO: no match in ${alive.size} tiles: $types"
             return autoSlashResult
         }
 
-        // Build a synthetic slash path through the matched tile positions
+        // Apply match directly — no slash detection needed
+        for (tile in bestMatch.tiles) {
+            tile.state = TileState.SHATTERING
+            shatterEffects.add(ShatterEffect.create(tile, density))
+        }
+
+        combo++
+        lastMatchTime = System.currentTimeMillis()
+        val multiplier = comboMultiplier(combo)
+        val points = (bestMatch.baseScore * multiplier).toInt()
+        score += points
+
+        // Visual slash trail through matched tiles
         val sorted = bestMatch.tiles.sortedBy { it.position.x }
-        val pathPoints = mutableListOf<Offset>()
-
-        val first = sorted.first().position
-        val last = sorted.last().position
-        val dx = last.x - first.x
-        val dy = last.y - first.y
-        val dist = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
-
-        // Use a large enough extend to guarantee the path exceeds MIN_SLASH_LENGTH_DP
-        val extend = 60f * density
-
-        // Direction: if tiles are nearly co-located, slash diagonally
-        val dirX = if (dist > 5f) dx / dist else 0.707f
-        val dirY = if (dist > 5f) dy / dist else 0.707f
-
-        pathPoints.add(Offset(first.x - dirX * extend, first.y - dirY * extend))
+        val trail = SlashTrail()
+        val now = System.currentTimeMillis()
         for (tile in sorted) {
-            pathPoints.add(tile.position)
+            trail.points.add(SlashTrailPoint(tile.position, now))
         }
-        pathPoints.add(Offset(last.x + dirX * extend, last.y + dirY * extend))
+        trail.resultColor = AccentGoldBright
+        trail.isFading = true
+        slashTrails.add(trail)
 
-        // Execute the slash through the engine's normal pipeline
-        onSlashStart(pathPoints.first())
-        for (i in 1 until pathPoints.size - 1) {
-            onSlashMove(pathPoints[i])
-        }
-        onSlashEnd(pathPoints.last())
+        // Floating score popup
+        val cx = bestMatch.tiles.map { it.position.x }.average().toFloat()
+        val cy = bestMatch.tiles.map { it.position.y }.average().toFloat()
+        val label = if (combo > 1) "+$points ×${comboMultiplierText(combo)}" else "+$points"
+        floatingTexts.add(FloatingText(
+            position = Offset(cx, cy),
+            text = label,
+            color = AccentGoldBright,
+        ))
+
+        // Screen flash
+        flashAlpha = 0.25f
+        flashColor = AccentGold
 
         val matchDesc = "${bestMatch.type.name} [${bestMatch.tiles.map { it.type.displayName }.joinToString("+")}]"
-        autoSlashResult = "AUTO: $matchDesc → score=$score combo=$combo hp=$bladeHealth"
+        autoSlashResult = "AUTO OK: $matchDesc → +$points score=$score"
         return autoSlashResult
     }
 

@@ -1,5 +1,6 @@
 package com.mahjongslash.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -18,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mahjongslash.game.engine.FloatingText
 import com.mahjongslash.game.engine.GamePhase
@@ -203,20 +207,67 @@ fun GameScreen(
 
         // Auto-slash debug button (temporary — remove after validation)
         if (state.phase == GamePhase.PLAYING) {
-            Text(
-                text = "⚡AUTO",
-                style = TextStyle(
-                    color = AccentGold.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                ),
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(12.dp)
-                    .clickable { viewModel.triggerAutoSlash() }
-                    .background(BackgroundDark.copy(alpha = 0.6f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+                    .padding(8.dp)
+                    .zIndex(100f)
+                    .size(width = 96.dp, height = 56.dp)
+                    .clickable {
+                        Log.d("MahjongSlash", "AUTO button tapped")
+                        val result = viewModel.triggerAutoSlash()
+                        Log.d("MahjongSlash", "AUTO result: $result")
+                    }
+                    .background(AccentRed.copy(alpha = 0.85f))
+            ) {
+                Text(
+                    text = "⚡AUTO",
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black,
+                    ),
+                )
+            }
+
+            // Auto-trigger on launch: retries every second until a match succeeds
+            LaunchedEffect(Unit) {
+                delay(2000L) // initial wait for tiles to spawn
+                for (attempt in 1..15) {
+                    val result = viewModel.triggerAutoSlash()
+                    Log.d("MahjongSlash", "AUTO attempt=$attempt result=$result")
+                    if (result.startsWith("AUTO OK")) break
+                    delay(1000L)
+                }
+            }
+        }
+
+        // Unmistakable debug banner at top-center (temporary — remove after validation)
+        if (state.debugAutoSlash.isNotEmpty()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 48.dp)
+                    .zIndex(200f)
+                    .background(
+                        if (state.debugAutoSlash.startsWith("AUTO OK"))
+                            Color(0xFF00AA00).copy(alpha = 0.9f)
+                        else
+                            Color(0xFFAA6600).copy(alpha = 0.9f)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = state.debugAutoSlash,
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
         }
 
         // Game over overlay
