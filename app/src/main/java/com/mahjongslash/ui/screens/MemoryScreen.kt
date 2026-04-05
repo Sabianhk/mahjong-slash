@@ -41,6 +41,7 @@ import com.mahjongslash.game.engine.MemoryDifficulty
 import com.mahjongslash.game.engine.MemoryEngine
 import com.mahjongslash.game.engine.MemoryPhase
 import com.mahjongslash.game.engine.MemoryState
+import com.mahjongslash.ui.components.AppBackground
 import com.mahjongslash.ui.theme.*
 
 @Composable
@@ -48,12 +49,11 @@ fun MemoryDifficultyScreen(
     onSelectDifficulty: (MemoryDifficulty) -> Unit,
     onBack: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark),
-        contentAlignment = Alignment.Center
-    ) {
+    AppBackground {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -129,6 +129,7 @@ fun MemoryDifficultyScreen(
                 )
             }
         }
+        }
     }
 }
 
@@ -163,11 +164,7 @@ fun MemoryGameScreen(
 
     val timeStr = formatTime(state.elapsedMs)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark)
-    ) {
+    AppBackground(bgAlpha = 0.55f) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -387,19 +384,18 @@ fun MemoryResultScreen(
         else -> "初" to "NOVICE"
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    AppBackground {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            // Rank
-            Text(
-                text = rank.first,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Rank
+                Text(
+                    text = rank.first,
                 style = TextStyle(
                     color = AccentRed,
                     fontSize = 72.sp,
@@ -488,6 +484,7 @@ fun MemoryResultScreen(
                     ),
                 )
             }
+        }
         }
     }
 }

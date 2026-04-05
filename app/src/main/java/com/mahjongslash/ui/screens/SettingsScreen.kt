@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mahjongslash.data.PreferencesManager
+import com.mahjongslash.ui.components.AppBackground
 import com.mahjongslash.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -35,11 +36,7 @@ fun SettingsScreen(
     val leftHanded by preferencesManager.leftHanded.collectAsState(initial = false)
     val scope = rememberCoroutineScope()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark),
-    ) {
+    AppBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()

@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mahjongslash.ui.components.AppBackground
 import com.mahjongslash.ui.theme.*
 
 @Composable
@@ -32,12 +33,11 @@ fun GameOverScreen(
 ) {
     val grade = gradeForScore(score)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark),
-        contentAlignment = Alignment.Center
-    ) {
+    AppBackground {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -124,6 +124,7 @@ fun GameOverScreen(
                     textAlign = TextAlign.Center,
                 )
             }
+        }
         }
     }
 }

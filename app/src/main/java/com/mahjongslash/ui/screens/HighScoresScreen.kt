@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mahjongslash.data.PreferencesManager
+import com.mahjongslash.ui.components.AppBackground
 import com.mahjongslash.ui.theme.*
 
 @Composable
@@ -30,11 +31,7 @@ fun HighScoresScreen(
 ) {
     val scores by preferencesManager.highScores.collectAsState(initial = emptyList())
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark),
-    ) {
+    AppBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()

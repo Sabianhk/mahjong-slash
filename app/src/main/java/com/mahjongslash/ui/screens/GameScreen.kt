@@ -42,6 +42,7 @@ import com.mahjongslash.game.engine.GameState
 import com.mahjongslash.game.render.TileRenderer.drawTile
 import com.mahjongslash.game.render.drawShatterEffect
 import com.mahjongslash.game.render.drawSlashTrail
+import com.mahjongslash.ui.components.AppBackground
 import com.mahjongslash.ui.theme.*
 import com.mahjongslash.viewmodel.GameViewModel
 
@@ -68,11 +69,7 @@ fun GameScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark)
-    ) {
+    AppBackground(bgAlpha = 0.55f) {
         // Game canvas
         Canvas(
             modifier = Modifier
@@ -102,13 +99,8 @@ fun GameScreen(
                     )
                 }
         ) {
-            // Draw background outside shake (stays stable)
-            val bgBitmap = viewModel.bgRenderer?.cachedBackground
-            if (bgBitmap != null) {
-                drawImage(bgBitmap)
-            } else {
-                drawRect(BackgroundDark)
-            }
+            // Background is handled by AppBackground behind the Canvas —
+            // no opaque fill here so the red/gold texture shows through.
 
             // Apply screen shake offset to all game elements
             translate(left = state.shakeOffsetX, top = state.shakeOffsetY) {

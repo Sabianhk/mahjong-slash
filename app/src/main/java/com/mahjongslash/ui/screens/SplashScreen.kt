@@ -17,21 +17,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mahjongslash.ui.components.AppBackground
+import com.mahjongslash.ui.components.TitleSlashEffect
 import com.mahjongslash.ui.theme.*
 
 @Composable
 fun SplashScreen(onTap: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundDark)
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() }
-            ) { onTap() },
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    AppBackground {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { onTap() },
+            contentAlignment = Alignment.Center
+        ) {
+            // Slash animation across title area
+            TitleSlashEffect()
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
             // Main title — brush calligraphy style
             Text(
                 text = "切牌",
@@ -76,6 +81,7 @@ fun SplashScreen(onTap: () -> Unit) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 60.dp)
             )
+            }
         }
     }
 }
