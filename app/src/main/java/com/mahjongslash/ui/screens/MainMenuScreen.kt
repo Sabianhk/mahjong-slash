@@ -27,6 +27,7 @@ import com.mahjongslash.ui.theme.*
 fun MainMenuScreen(
     preferencesManager: PreferencesManager,
     onPlay: () -> Unit,
+    onMemory: () -> Unit = {},
     onHighScores: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -79,7 +80,8 @@ fun MainMenuScreen(
             }
 
             // Tile-shaped buttons
-            TileButton(text = "遊 PLAY", onClick = onPlay)
+            TileButton(text = "遊 SLASH", onClick = onPlay)
+            TileButton(text = "憶 MEMORY", onClick = onMemory)
             TileButton(text = "記 SCORES", onClick = onHighScores)
             TileButton(text = "設 SETTINGS", onClick = onSettings)
         }

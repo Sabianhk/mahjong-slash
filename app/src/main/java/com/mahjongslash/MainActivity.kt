@@ -28,6 +28,7 @@ import com.mahjongslash.data.PreferencesManager
 import com.mahjongslash.game.audio.AudioManager
 import com.mahjongslash.ui.screens.*
 import com.mahjongslash.ui.theme.MahjongSlashTheme
+import com.mahjongslash.game.engine.MemoryDifficulty
 import com.mahjongslash.viewmodel.GameViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,8 +69,8 @@ class MainActivity : ComponentActivity() {
                             route == "game" && gameMusicRes != 0 -> {
                                 musicManager.startMusic(gameMusicRes, volume = 0.25f)
                             }
-                            route in listOf("menu", "splash", "scores", "settings") ||
-                                route.startsWith("gameover") -> {
+                            route in listOf("menu", "splash", "scores", "settings", "memory_pick") ||
+                                route.startsWith("gameover") || route.startsWith("memory_result") -> {
                                 if (menuMusicRes != 0) musicManager.startMusic(menuMusicRes, volume = 0.3f)
                                 else musicManager.stopMusic()
                             }
@@ -117,6 +118,7 @@ class MainActivity : ComponentActivity() {
                                     popUpTo("menu")
                                 }
                             },
+                            onMemory = { navController.navigate("memory_pick") },
                             onHighScores = { navController.navigate("scores") },
                             onSettings = { navController.navigate("settings") },
                         )
@@ -168,6 +170,79 @@ class MainActivity : ComponentActivity() {
                             accuracy = accuracy,
                             onPlayAgain = {
                                 navController.navigate("game") {
+                                    popUpTo("menu")
+                                }
+                            },
+                            onMenu = {
+                                navController.navigate("menu") {
+                                    popUpTo("menu") { inclusive = true }
+                                }
+                            },
+                        )
+                    }
+
+                    composable("memory_pick") {
+                        MemoryDifficultyScreen(
+                            onSelectDifficulty = { diff ->
+                                navController.navigate("memory_game/${diff.name}") {
+                                    popUpTo("memory_pick")
+                                }
+                            },
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
+
+                    composable(
+                        "memory_game/{difficulty}",
+                        enterTransition = { fadeIn(tween(400)) },
+                        exitTransition = { fadeOut(tween(400)) },
+                        arguments = listOf(
+                            navArgument("difficulty") { type = NavType.StringType },
+                        )
+                    ) { backStackEntry ->
+                        val diffName = backStackEntry.arguments?.getString("difficulty") ?: "EASY"
+                        val diff = MemoryDifficulty.valueOf(diffName)
+                        MemoryGameScreen(
+                            difficulty = diff,
+                            onWin = { score, moves, timeMs, difficulty ->
+                                navController.navigate(
+                                    "memory_result/$score/$moves/$timeMs/${difficulty.name}"
+                                ) {
+                                    popUpTo("menu")
+                                }
+                            },
+                            onBack = {
+                                navController.navigate("menu") {
+                                    popUpTo("menu") { inclusive = true }
+                                }
+                            },
+                        )
+                    }
+
+                    composable(
+                        "memory_result/{score}/{moves}/{time}/{difficulty}",
+                        enterTransition = { fadeIn(tween(500)) },
+                        exitTransition = { fadeOut(tween(300)) },
+                        arguments = listOf(
+                            navArgument("score") { type = NavType.IntType },
+                            navArgument("moves") { type = NavType.IntType },
+                            navArgument("time") { type = NavType.LongType },
+                            navArgument("difficulty") { type = NavType.StringType },
+                        )
+                    ) { backStackEntry ->
+                        val score = backStackEntry.arguments?.getInt("score") ?: 0
+                        val moves = backStackEntry.arguments?.getInt("moves") ?: 0
+                        val timeMs = backStackEntry.arguments?.getLong("time") ?: 0L
+                        val diffName = backStackEntry.arguments?.getString("difficulty") ?: "EASY"
+                        val diff = MemoryDifficulty.valueOf(diffName)
+
+                        MemoryResultScreen(
+                            score = score,
+                            moves = moves,
+                            timeMs = timeMs,
+                            difficulty = diff,
+                            onPlayAgain = {
+                                navController.navigate("memory_game/${diff.name}") {
                                     popUpTo("menu")
                                 }
                             },
