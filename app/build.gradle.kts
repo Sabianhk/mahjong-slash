@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
 }
 
 android {
@@ -13,13 +20,23 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(localProps.getProperty("storeFile", ""))
+            storePassword = localProps.getProperty("storePassword", "")
+            keyAlias = localProps.getProperty("keyAlias", "")
+            keyPassword = localProps.getProperty("keyPassword", "")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -57,6 +74,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
 
     implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

@@ -5,7 +5,6 @@ import com.mahjongslash.game.gesture.SlashDetector
 import com.mahjongslash.game.model.Tile
 import com.mahjongslash.game.model.TileSet
 import com.mahjongslash.game.model.TileState
-import com.mahjongslash.game.model.TileSuit
 import com.mahjongslash.game.model.TileType
 import com.mahjongslash.game.render.ShatterEffect
 import com.mahjongslash.game.render.SlashTrail
@@ -21,7 +20,20 @@ import kotlin.random.Random
  * Core game engine. Manages tile spawning, movement, slash detection,
  * match validation, and score/combo tracking.
  */
+/**
+ * Callback for audio/haptic events. Decouples engine from Android framework.
+ */
+interface GameEventListener {
+    fun onSlashValid(comboLevel: Int)
+    fun onSlashInvalid()
+    fun onComboIncrement(comboLevel: Int)
+    fun onComboBreak()
+    fun onBladeDamage(remainingHealth: Int)
+    fun onGameOver()
+}
+
 class GameEngine {
+    var eventListener: GameEventListener? = null
     private var nextInstanceId = 0L
     private var screenW = 0f
     private var screenH = 0f
@@ -37,7 +49,7 @@ class GameEngine {
     private var score = 0
     private var combo = 0
     private var lastMatchTime = 0L
-    private var bladeHealth = 5
+    private var bladeHealth = 3
 
     // Screen flash
     private var flashAlpha = 0f
@@ -45,8 +57,7 @@ class GameEngine {
 
     // Spawning
     private var timeSinceLastSpawn = 0f
-    private var spawnInterval = 0.7f
-    private var maxTilesOnScreen = 12
+    private val difficulty = DifficultyScaler()
     private val rng = Random(System.nanoTime())
 
     // Wave/burst spawning: queue of tiles to spawn in quick succession
@@ -71,15 +82,40 @@ class GameEngine {
     // Combo timing
     private val comboTimeoutMs = 3000L
 
+    // Stats tracking
+    private var tilesCleared = 0
+    private var maxCombo = 0
+    private var totalSlashes = 0
+    private var validSlashes = 0
+
+    // Hint system: after 3 consecutive misses, highlight a valid pair
+    private var consecutiveMisses = 0
+    private var hintTileIds = setOf<Long>()
+    private var hintExpireTime = 0L
+
+    // Screen shake
+    private var shakeIntensity = 0f
+    private var shakeOffsetX = 0f
+    private var shakeOffsetY = 0f
+
+    // Slow-motion on big combos
+    private var timeDilation = 1f       // 1.0 = normal, 0.3 = slow-mo
+    private var timeDilationRemaining = 0f
+
+    // Game over animation
+    private var gameOverAnimPhase = false
+    private var gameOverAnimElapsed = 0f
+    private var gameOverNextShatterIdx = 0
+    private val GAME_OVER_FREEZE_SECS = 0.4f       // Freeze before shattering starts
+    private val GAME_OVER_SHATTER_INTERVAL = 0.08f  // Time between each tile shattering
+    private val GAME_OVER_TOTAL_SECS = 2.5f         // Total anim before transitioning
+    private var frozenTileOrder = mutableListOf<Long>() // order to shatter tiles
+
+    // Frame counter — ensures every GameState snapshot is unique for StateFlow emission
+    private var frameCount = 0L
+
     // How long a shattering tile stays visible (fading out alongside fragments)
     private val SHATTER_VISIBLE_SECS = 0.35f
-
-    // Debug (temporary — remove after validation)
-    private var debugLastSlash = ""
-    private var debugLastPath = listOf<Offset>()
-
-    // Auto-slash result for debug display
-    private var autoSlashResult = ""
 
     fun initialize(width: Float, height: Float, density: Float) {
         screenW = width
@@ -91,12 +127,29 @@ class GameEngine {
         floatingTexts.clear()
         score = 0
         combo = 0
-        bladeHealth = 5
+        bladeHealth = 3
         flashAlpha = 0f
-        timeSinceLastSpawn = spawnInterval
+        paused = false
+        tilesCleared = 0
+        maxCombo = 0
+        totalSlashes = 0
+        validSlashes = 0
+        difficulty.reset()
+        consecutiveMisses = 0
+        hintTileIds = emptySet()
+        hintExpireTime = 0L
+        shakeIntensity = 0f
+        shakeOffsetX = 0f
+        shakeOffsetY = 0f
+        timeDilation = 1f
+        timeDilationRemaining = 0f
+        gameOverAnimPhase = false
+        gameOverAnimElapsed = 0f
+        gameOverNextShatterIdx = 0
+        frozenTileOrder.clear()
+        timeSinceLastSpawn = difficulty.spawnInterval
         spawnQueue.clear()
         burstDelay = 0f
-        autoSlashResult = ""
         refreshPool()
         tilesSpawnedFromPool = 0
     }
@@ -104,9 +157,37 @@ class GameEngine {
     /**
      * Main update tick. Called every frame with delta time in seconds.
      */
+    private var paused = false
+
+    fun pause() { paused = true }
+    fun resume() {
+        paused = false
+        // Reset timing so we don't get a huge dt spike after unpause
+        lastMatchTime = System.currentTimeMillis()
+    }
+
     fun update(dt: Float): GameState {
         if (screenW == 0f) return GameState()
-        if (bladeHealth <= 0) return snapshot()
+        if (paused) return snapshot().copy(phase = GamePhase.PAUSED)
+
+        // Game over animation phase
+        if (gameOverAnimPhase) {
+            return updateGameOverAnim(dt)
+        }
+        if (bladeHealth <= 0 && !gameOverAnimPhase) {
+            startGameOverAnim()
+            return updateGameOverAnim(dt)
+        }
+
+        // Slow-motion: decay timer in real time, but dilate game dt
+        if (timeDilationRemaining > 0f) {
+            timeDilationRemaining -= dt
+            if (timeDilationRemaining <= 0f) {
+                timeDilation = 1f
+                timeDilationRemaining = 0f
+            }
+        }
+        val gameDt = dt * timeDilation
 
         val now = System.currentTimeMillis()
 
@@ -117,20 +198,28 @@ class GameEngine {
 
         // Process burst spawn queue (rapid successive spawns for grouped tiles)
         if (spawnQueue.isNotEmpty()) {
-            burstDelay -= dt
+            burstDelay -= gameDt
             if (burstDelay <= 0f) {
-                val queued = spawnQueue.removeFirst()
+                val queued = spawnQueue.removeAt(0)
                 spawnTileFromQueue(queued)
                 burstDelay = 0.15f + rng.nextFloat() * 0.15f // 150-300ms between burst tiles
             }
         }
 
         // Spawn tiles (or queue a burst group)
-        timeSinceLastSpawn += dt
-        if (spawnQueue.isEmpty() && timeSinceLastSpawn >= spawnInterval &&
-            tiles.count { it.state == TileState.ALIVE } < maxTilesOnScreen) {
+        timeSinceLastSpawn += gameDt
+        if (spawnQueue.isEmpty() && timeSinceLastSpawn >= difficulty.spawnInterval &&
+            tiles.count { it.state == TileState.ALIVE } < difficulty.maxTiles) {
             queueSpawnGroup()
             timeSinceLastSpawn = 0f
+        }
+
+        // Anti-frustration: ensure at least 1 valid pair exists on screen
+        ensurePairExists()
+
+        // Expire hint highlight
+        if (hintTileIds.isNotEmpty() && now > hintExpireTime) {
+            hintTileIds = emptySet()
         }
 
         // Update tile positions — gentle deceleration + sinusoidal wobble for floating feel
@@ -145,13 +234,13 @@ class GameEngine {
                 val wobbleAmp = 12f * density // gentle 12dp side-to-side
                 val wobbleFreq = 1.5f + (tile.instanceId % 3) * 0.3f // slight per-tile variation
                 val wobblePhase = (tile.instanceId * 1.7f) // unique starting phase
-                val wobble = sin((age * wobbleFreq + wobblePhase).toDouble()).toFloat() * wobbleAmp * dt
+                val wobble = sin((age * wobbleFreq + wobblePhase).toDouble()).toFloat() * wobbleAmp * gameDt
                 val perpX = if (vLen > 0.01f) -tile.velocity.y / vLen else 0f
                 val perpY = if (vLen > 0.01f) tile.velocity.x / vLen else 0f
 
                 tile.position = Offset(
-                    tile.position.x + tile.velocity.x * speedFactor * dt + perpX * wobble,
-                    tile.position.y + tile.velocity.y * speedFactor * dt + perpY * wobble
+                    tile.position.x + tile.velocity.x * speedFactor * gameDt + perpX * wobble,
+                    tile.position.y + tile.velocity.y * speedFactor * gameDt + perpY * wobble
                 )
             }
         }
@@ -168,7 +257,7 @@ class GameEngine {
         // Update shattering tiles: fade out then mark dead
         for (tile in tiles) {
             if (tile.state == TileState.SHATTERING) {
-                tile.shatterElapsed += dt
+                tile.shatterElapsed += gameDt
                 val progress = (tile.shatterElapsed / SHATTER_VISIBLE_SECS).coerceIn(0f, 1f)
                 tile.alpha = 1f - progress
                 if (tile.shatterElapsed >= SHATTER_VISIBLE_SECS) {
@@ -182,8 +271,10 @@ class GameEngine {
 
         // Update shatter effects
         for (effect in shatterEffects) {
-            effect.update(dt)
+            effect.update(gameDt)
         }
+        val deadEffects = shatterEffects.filter { !it.isAlive }
+        for (dead in deadEffects) ShatterEffect.recycle(dead)
         shatterEffects.removeAll { !it.isAlive }
 
         // Update slash trail fading
@@ -196,13 +287,24 @@ class GameEngine {
 
         // Update floating texts
         for (ft in floatingTexts) {
-            ft.elapsed += dt
+            ft.elapsed += gameDt
         }
         floatingTexts.removeAll { !it.isAlive }
 
         // Decay screen flash
         if (flashAlpha > 0f) {
-            flashAlpha = (flashAlpha - dt * 3f).coerceAtLeast(0f)
+            flashAlpha = (flashAlpha - gameDt * 3f).coerceAtLeast(0f)
+        }
+
+        // Decay screen shake
+        if (shakeIntensity > 0.5f) {
+            shakeOffsetX = (rng.nextFloat() - 0.5f) * 2f * shakeIntensity
+            shakeOffsetY = (rng.nextFloat() - 0.5f) * 2f * shakeIntensity
+            shakeIntensity *= (1f - gameDt * 8f).coerceAtLeast(0f) // fast decay
+        } else {
+            shakeIntensity = 0f
+            shakeOffsetX = 0f
+            shakeOffsetY = 0f
         }
 
         return snapshot()
@@ -237,47 +339,11 @@ class GameEngine {
         )
         val slashed = slashResult.tiles
 
-        // Debug diagnostics (temporary — remove after validation)
-        val aliveTiles = tiles.filter { it.state == TileState.ALIVE }
-        val aliveTileCount = aliveTiles.size
-        debugLastPath = activeSlashPoints.toList()
-
-        // Build detailed debug: path bounds vs tile bounds
-        val pathXs = activeSlashPoints.map { it.x }
-        val pathYs = activeSlashPoints.map { it.y }
-        val pathBounds = if (pathXs.isNotEmpty())
-            "px[${pathXs.min().toInt()}..${pathXs.max().toInt()}]" +
-            "py[${pathYs.min().toInt()}..${pathYs.max().toInt()}]"
-        else "nopath"
-
-        val tileInfo = if (aliveTiles.isNotEmpty()) {
-            val txs = aliveTiles.map { it.position.x }
-            val tys = aliveTiles.map { it.position.y }
-            "tx[${txs.min().toInt()}..${txs.max().toInt()}]" +
-            "ty[${tys.min().toInt()}..${tys.max().toInt()}]"
-        } else "notiles"
-
-        // Find nearest tile distance to any path point for miss diagnosis
-        var nearestDist = Float.MAX_VALUE
-        for (pt in activeSlashPoints) {
-            for (tile in aliveTiles) {
-                val dx = pt.x - tile.position.x
-                val dy = pt.y - tile.position.y
-                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                if (dist < nearestDist) nearestDist = dist
-            }
-        }
-        val nearStr = if (nearestDist < Float.MAX_VALUE) "near=${nearestDist.toInt()}px" else ""
-
-        debugLastSlash = "len=${slashResult.lengthDp.toInt()}dp pts=${slashResult.pointCount} " +
-            "hit=${slashed.size}/${aliveTileCount} st=${slashResult.status}\n" +
-            "$pathBounds $tileInfo $nearStr d=${density}"
-
         if (slashed.isNotEmpty()) {
-            val matchResult = findBestMatch(slashed)
+            val matchResult = findPairMatch(slashed)
 
             if (matchResult != null) {
-                // Valid match — shatter, score, flash gold
+                // Valid pair match — shatter, score, flash gold
                 for (tile in matchResult.tiles) {
                     tile.state = TileState.SHATTERING
                     shatterEffects.add(ShatterEffect.create(tile, density))
@@ -289,37 +355,60 @@ class GameEngine {
                 val points = (matchResult.baseScore * multiplier).toInt()
                 score += points
 
-                // Color the trail gold on success
                 activeTrail?.resultColor = AccentGoldBright
 
-                // Floating score popup at centroid of matched tiles
                 val cx = matchResult.tiles.map { it.position.x }.average().toFloat()
                 val cy = matchResult.tiles.map { it.position.y }.average().toFloat()
-                val label = if (combo > 1) {
-                    "+$points ×${comboMultiplierText(combo)}"
-                } else {
-                    "+$points"
-                }
+                val label = if (combo > 1) "+$points ×${comboMultiplierText(combo)}" else "+$points"
                 floatingTexts.add(FloatingText(
                     position = Offset(cx, cy),
                     text = label,
                     color = AccentGoldBright,
                 ))
 
-                // Screen flash — gold
+                // Combo escalation text — fighting game style
+                val comboLabel = comboEscalationLabel(combo)
+                if (comboLabel != null) {
+                    floatingTexts.add(FloatingText(
+                        position = Offset(screenW / 2f, screenH * 0.35f),
+                        text = comboLabel,
+                        color = AccentGoldBright,
+                        duration = 1.2f,
+                        scale = comboEscalationScale(combo),
+                    ))
+                }
+
                 flashAlpha = 0.25f
                 flashColor = AccentGold
 
-                // Tiles stay SHATTERING — update() will fade and transition to DEAD
-            } else if (slashed.size >= 3) {
-                // Invalid match — penalty only when slashing 3+ non-matching tiles
+                // Slow-mo on 3+ combo — 0.3x time for 200ms
+                if (combo >= 3) {
+                    timeDilation = 0.3f
+                    timeDilationRemaining = 0.2f
+                }
+
+                tilesCleared += matchResult.tiles.size
+                if (combo > maxCombo) maxCombo = combo
+                totalSlashes++
+                validSlashes++
+                consecutiveMisses = 0
+                hintTileIds = emptySet()
+
+                eventListener?.onSlashValid(combo)
+                if (combo > 1) eventListener?.onComboIncrement(combo)
+            } else {
+                // No pair found — invalid slash, blade takes damage
+                totalSlashes++
+                consecutiveMisses++
+                if (consecutiveMisses >= 3) {
+                    activateHint()
+                }
+                val hadCombo = combo > 0
                 combo = 0
                 bladeHealth = (bladeHealth - 1).coerceAtLeast(0)
 
-                // Color the trail red on failure
                 activeTrail?.resultColor = AccentRed
 
-                // Floating penalty text
                 val cx = slashed.map { it.position.x }.average().toFloat()
                 val cy = slashed.map { it.position.y }.average().toFloat()
                 floatingTexts.add(FloatingText(
@@ -328,9 +417,14 @@ class GameEngine {
                     color = AccentRed,
                 ))
 
-                // Screen flash — red
                 flashAlpha = 0.2f
                 flashColor = AccentRed
+                shakeIntensity = 12f * density // screen shake on damage
+
+                eventListener?.onSlashInvalid()
+                eventListener?.onBladeDamage(bladeHealth)
+                if (hadCombo) eventListener?.onComboBreak()
+                if (bladeHealth <= 0) eventListener?.onGameOver()
             }
         }
 
@@ -354,92 +448,40 @@ class GameEngine {
         else -> "3.0"
     }
 
-    private fun findBestMatch(slashed: List<Tile>): MatchResult? {
+    private fun findPairMatch(slashed: List<Tile>): MatchResult? {
         val candidates = slashed.filter { it.state == TileState.ALIVE }
         if (candidates.size < 2) return null
 
-        var best: MatchResult? = null
-
-        // Check triplets (3 identical) — highest score
-        if (candidates.size >= 3) {
-            for (i in candidates.indices) {
-                for (j in i + 1 until candidates.size) {
-                    for (k in j + 1 until candidates.size) {
-                        val a = candidates[i]
-                        val b = candidates[j]
-                        val c = candidates[k]
-                        if (TileSet.isTriplet(a.type, b.type, c.type)) {
-                            val result = MatchResult(listOf(a, b, c), 350, MatchType.TRIPLET)
-                            if (best == null || result.baseScore > best.baseScore) best = result
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check sequences (3 consecutive same suit)
-        if (candidates.size >= 3) {
-            for (i in candidates.indices) {
-                for (j in i + 1 until candidates.size) {
-                    for (k in j + 1 until candidates.size) {
-                        val a = candidates[i]
-                        val b = candidates[j]
-                        val c = candidates[k]
-                        if (TileSet.isSequence(a.type, b.type, c.type)) {
-                            val result = MatchResult(listOf(a, b, c), 200, MatchType.SEQUENCE)
-                            if (best == null || result.baseScore > best.baseScore) best = result
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check pairs (2 identical) — lowest priority
+        // Find any matching pair (2 identical tiles)
         for (i in candidates.indices) {
             for (j in i + 1 until candidates.size) {
                 if (TileSet.isPair(candidates[i].type, candidates[j].type)) {
-                    val result = MatchResult(listOf(candidates[i], candidates[j]), 100, MatchType.PAIR)
-                    if (best == null || result.baseScore > best.baseScore) best = result
+                    return MatchResult(listOf(candidates[i], candidates[j]), 100)
                 }
             }
         }
 
-        return best
+        return null
     }
 
     /**
-     * Build a pool that always contains at least one matchable group:
-     *  - Pick a random suited tile and include 2-3 consecutive values in that suit (sequence-ready).
-     *  - Duplicate one type so pairs are immediately possible.
-     *  - Fill remaining slots randomly.
+     * Build a pool of tile types. Includes a duplicate so pairs are always possible.
      */
     private fun refreshPool() {
         recentPool.clear()
-        val suited = TileSet.allTypes.filter { it.isSuited }
-
-        // Seed a sequence-capable run of 3 consecutive values in one suit
-        val baseSuit = listOf(TileSuit.CHARACTERS, TileSuit.DOTS, TileSuit.BAMBOO).random(rng)
-        val startVal = rng.nextInt(7) + 1 // 1..7 so startVal+2 <= 9
-        for (v in startVal..startVal + 2) {
-            recentPool.add(suited.first { it.suit == baseSuit && it.value == v })
-        }
-
-        // Add a duplicate of one of them so a pair is always possible
-        recentPool.add(recentPool[rng.nextInt(recentPool.size)])
-
-        // Fill remaining slots from other types
-        val remaining = TileSet.allTypes.filter { it !in recentPool }.shuffled(rng)
-        for (t in remaining) {
-            if (recentPool.size >= poolSize) break
+        val shuffled = TileSet.allTypes.shuffled(rng)
+        for (t in shuffled) {
+            if (recentPool.size >= poolSize - 1) break
             recentPool.add(t)
         }
+        // Add a duplicate so a pair is always possible from pool
+        recentPool.add(recentPool[rng.nextInt(recentPool.size)])
         recentPool.shuffle(rng)
     }
 
     /**
      * Pick the next tile type, biased toward matchability.
-     * With [echoChance] probability, instead of a random pool pick,
-     * choose a type that would form a pair or sequence with a tile already on screen.
+     * With [echoChance] probability, spawn a duplicate of a tile already on screen.
      */
     private fun pickTileType(): TileType {
         tilesSpawnedFromPool++
@@ -452,76 +494,30 @@ class GameEngine {
             tilesSpawnedFromPool = 0
         }
 
-        // Echo spawn: match something already on screen
+        // Echo spawn: duplicate something already on screen (pair-ready)
         val alive = tiles.filter { it.state == TileState.ALIVE }
         if (alive.isNotEmpty() && rng.nextFloat() < echoChance) {
-            val target = alive[rng.nextInt(alive.size)]
-            // 60% chance: duplicate (pair-ready), 40% chance: adjacent value (sequence-ready)
-            return if (rng.nextFloat() < 0.6f || target.type.isHonor) {
-                target.type
-            } else {
-                val delta = if (rng.nextBoolean()) 1 else -1
-                val adjVal = target.type.value + delta
-                TileSet.allTypes.firstOrNull { it.suit == target.type.suit && it.value == adjVal }
-                    ?: target.type // fallback to duplicate if at suit boundary
-            }
+            return alive[rng.nextInt(alive.size)].type
         }
 
         return recentPool[rng.nextInt(recentPool.size)]
     }
 
     /**
-     * Queue a group of tiles to spawn in a burst. ~60% of the time spawns a
-     * matchable group (pair or sequence) from the same edge/area so they cluster.
-     * The rest of the time spawns a single tile.
+     * Queue a group of tiles to spawn. ~60% of the time spawns a pair
+     * from the same edge so they cluster. Otherwise spawns a single tile.
      */
     private fun queueSpawnGroup() {
         val edge = rng.nextInt(4)
-        val baseLane = rng.nextFloat() // 0..1 position along the edge
+        val baseLane = rng.nextFloat()
 
         if (rng.nextFloat() < 0.6f) {
-            // Burst: spawn a matchable group (2-3 tiles) from nearby positions
-            val groupSize = if (rng.nextFloat() < 0.35f) 3 else 2
-
-            // Pick the first tile type
-            val firstType = pickTileType()
-            spawnQueue.add(QueuedSpawn(firstType, edge, baseLane))
-
-            if (groupSize >= 2) {
-                // Second tile: either duplicate (pair) or adjacent (sequence)
-                val secondType = if (rng.nextFloat() < 0.5f || firstType.isHonor) {
-                    firstType // pair-ready
-                } else {
-                    val delta = if (rng.nextBoolean()) 1 else -1
-                    val adjVal = firstType.value + delta
-                    TileSet.allTypes.firstOrNull { it.suit == firstType.suit && it.value == adjVal }
-                        ?: firstType
-                }
-                val laneJitter = (rng.nextFloat() - 0.5f) * 0.15f
-                spawnQueue.add(QueuedSpawn(secondType, edge, (baseLane + laneJitter).coerceIn(0f, 1f)))
-            }
-
-            if (groupSize >= 3) {
-                // Third tile: complete the triplet or sequence
-                val thirdType = if (spawnQueue.size >= 2 && spawnQueue[0].type == spawnQueue[1].type) {
-                    firstType // triplet
-                } else {
-                    // Try to complete a sequence
-                    val vals = listOf(spawnQueue[0].type.value, spawnQueue[1].type.value).sorted()
-                    val needed = if (vals[1] - vals[0] == 1) {
-                        // consecutive pair — add the next or previous
-                        listOf(vals[0] - 1, vals[1] + 1).filter { it in 1..9 }.randomOrNull()
-                    } else null
-                    if (needed != null) {
-                        TileSet.allTypes.firstOrNull { it.suit == firstType.suit && it.value == needed }
-                            ?: firstType
-                    } else firstType
-                }
-                val laneJitter = (rng.nextFloat() - 0.5f) * 0.15f
-                spawnQueue.add(QueuedSpawn(thirdType, edge, (baseLane + laneJitter).coerceIn(0f, 1f)))
-            }
-
-            burstDelay = 0f // spawn first one immediately
+            // Burst: spawn a matching pair from nearby positions
+            val type = pickTileType()
+            spawnQueue.add(QueuedSpawn(type, edge, baseLane))
+            val laneJitter = (rng.nextFloat() - 0.5f) * 0.15f
+            spawnQueue.add(QueuedSpawn(type, edge, (baseLane + laneJitter).coerceIn(0f, 1f)))
+            burstDelay = 0f
         } else {
             // Single tile spawn
             spawnQueue.add(QueuedSpawn(pickTileType(), edge, baseLane))
@@ -533,8 +529,7 @@ class GameEngine {
         val tileW = Tile.WIDTH_DP * density
         val tileH = Tile.HEIGHT_DP * density
 
-        // Slower base speed: 30-50 dp/s (was 55-100) for a floating feel
-        val baseSpeed = 30f + rng.nextFloat() * 20f
+        val baseSpeed = difficulty.baseSpeedDpPerSec + rng.nextFloat() * difficulty.speedVarianceDpPerSec
         val speed = baseSpeed * density
 
         val topInset = 60f * density
@@ -584,74 +579,128 @@ class GameEngine {
     }
 
     /**
-     * DEV HELPER: Finds the best available match on screen and applies it directly.
-     * Bypasses slash gesture detection entirely — directly shatters matched tiles,
-     * updates score, and creates visual effects. This guarantees reliable activation
-     * from emulator automation or auto-trigger.
-     * Returns a description of what happened for debug display.
+     * Highlight a valid pair on screen for 3 seconds.
      */
-    fun triggerAutoSlash(): String {
-        if (screenW == 0f) {
-            autoSlashResult = "AUTO: not initialized"
-            return autoSlashResult
-        }
-
+    private fun activateHint() {
         val alive = tiles.filter { it.state == TileState.ALIVE }
-        if (alive.size < 2) {
-            autoSlashResult = "AUTO: waiting (${alive.size} tiles)"
-            return autoSlashResult
+        for (i in alive.indices) {
+            for (j in i + 1 until alive.size) {
+                if (alive[i].type.id == alive[j].type.id) {
+                    hintTileIds = setOf(alive[i].instanceId, alive[j].instanceId)
+                    hintExpireTime = System.currentTimeMillis() + 3000L
+                    consecutiveMisses = 0
+                    return
+                }
+            }
+        }
+    }
+
+    /**
+     * If no valid pair exists among alive tiles, queue a duplicate of a random alive tile.
+     */
+    private fun ensurePairExists() {
+        val alive = tiles.filter { it.state == TileState.ALIVE }
+        if (alive.size < 2) return
+
+        // Check if any pair exists
+        for (i in alive.indices) {
+            for (j in i + 1 until alive.size) {
+                if (alive[i].type.id == alive[j].type.id) return // pair exists
+            }
         }
 
-        val bestMatch = findBestMatch(alive)
-        if (bestMatch == null) {
-            val types = alive.map { it.type.displayName }.joinToString(", ")
-            autoSlashResult = "AUTO: no match in ${alive.size} tiles: $types"
-            return autoSlashResult
+        // No pair found — force-queue a duplicate of a random alive tile
+        val target = alive[rng.nextInt(alive.size)]
+        val edge = rng.nextInt(4)
+        val lane = rng.nextFloat()
+        spawnQueue.add(QueuedSpawn(target.type, edge, lane))
+        burstDelay = 0f
+    }
+
+    private fun startGameOverAnim() {
+        gameOverAnimPhase = true
+        gameOverAnimElapsed = 0f
+        gameOverNextShatterIdx = 0
+        // Order: shatter from center outward
+        val cx = screenW / 2f
+        val cy = screenH / 2f
+        frozenTileOrder.clear()
+        tiles.filter { it.state == TileState.ALIVE }
+            .sortedBy { val dx = it.position.x - cx; val dy = it.position.y - cy; dx * dx + dy * dy }
+            .forEach { frozenTileOrder.add(it.instanceId) }
+    }
+
+    private fun updateGameOverAnim(dt: Float): GameState {
+        gameOverAnimElapsed += dt
+
+        // After freeze period, start shattering tiles one by one
+        if (gameOverAnimElapsed > GAME_OVER_FREEZE_SECS && gameOverNextShatterIdx < frozenTileOrder.size) {
+            val shatterTime = gameOverAnimElapsed - GAME_OVER_FREEZE_SECS
+            val targetIdx = (shatterTime / GAME_OVER_SHATTER_INTERVAL).toInt()
+                .coerceAtMost(frozenTileOrder.size)
+
+            while (gameOverNextShatterIdx < targetIdx) {
+                val tileId = frozenTileOrder[gameOverNextShatterIdx]
+                val tile = tiles.find { it.instanceId == tileId && it.state == TileState.ALIVE }
+                if (tile != null) {
+                    tile.state = TileState.SHATTERING
+                    shatterEffects.add(ShatterEffect.create(tile, density))
+                }
+                gameOverNextShatterIdx++
+            }
         }
 
-        // Apply match directly — no slash detection needed
-        for (tile in bestMatch.tiles) {
-            tile.state = TileState.SHATTERING
-            shatterEffects.add(ShatterEffect.create(tile, density))
+        // Update shattering tiles
+        for (tile in tiles) {
+            if (tile.state == TileState.SHATTERING) {
+                tile.shatterElapsed += dt
+                val progress = (tile.shatterElapsed / SHATTER_VISIBLE_SECS).coerceIn(0f, 1f)
+                tile.alpha = 1f - progress
+                if (tile.shatterElapsed >= SHATTER_VISIBLE_SECS) {
+                    tile.state = TileState.DEAD
+                }
+            }
+        }
+        tiles.removeAll { it.state == TileState.DEAD }
+
+        // Update shatter effects
+        for (effect in shatterEffects) {
+            effect.update(dt)
+        }
+        val deadEffects = shatterEffects.filter { !it.isAlive }
+        for (dead in deadEffects) ShatterEffect.recycle(dead)
+        shatterEffects.removeAll { !it.isAlive }
+
+        // Update floating texts
+        for (ft in floatingTexts) {
+            ft.elapsed += dt
+        }
+        floatingTexts.removeAll { !it.isAlive }
+
+        // Decay screen shake
+        if (shakeIntensity > 0.5f) {
+            shakeOffsetX = (rng.nextFloat() - 0.5f) * 2f * shakeIntensity
+            shakeOffsetY = (rng.nextFloat() - 0.5f) * 2f * shakeIntensity
+            shakeIntensity *= (1f - dt * 8f).coerceAtLeast(0f)
+        } else {
+            shakeIntensity = 0f
+            shakeOffsetX = 0f
+            shakeOffsetY = 0f
         }
 
-        combo++
-        lastMatchTime = System.currentTimeMillis()
-        val multiplier = comboMultiplier(combo)
-        val points = (bestMatch.baseScore * multiplier).toInt()
-        score += points
-
-        // Visual slash trail through matched tiles
-        val sorted = bestMatch.tiles.sortedBy { it.position.x }
-        val trail = SlashTrail()
-        val now = System.currentTimeMillis()
-        for (tile in sorted) {
-            trail.points.add(SlashTrailPoint(tile.position, now))
+        // Transition to final GAME_OVER after animation completes
+        val phase = if (gameOverAnimElapsed >= GAME_OVER_TOTAL_SECS) {
+            gameOverAnimPhase = false
+            GamePhase.GAME_OVER
+        } else {
+            GamePhase.GAME_OVER_ANIM
         }
-        trail.resultColor = AccentGoldBright
-        trail.isFading = true
-        slashTrails.add(trail)
 
-        // Floating score popup
-        val cx = bestMatch.tiles.map { it.position.x }.average().toFloat()
-        val cy = bestMatch.tiles.map { it.position.y }.average().toFloat()
-        val label = if (combo > 1) "+$points ×${comboMultiplierText(combo)}" else "+$points"
-        floatingTexts.add(FloatingText(
-            position = Offset(cx, cy),
-            text = label,
-            color = AccentGoldBright,
-        ))
-
-        // Screen flash
-        flashAlpha = 0.25f
-        flashColor = AccentGold
-
-        val matchDesc = "${bestMatch.type.name} [${bestMatch.tiles.map { it.type.displayName }.joinToString("+")}]"
-        autoSlashResult = "AUTO OK: $matchDesc → +$points score=$score"
-        return autoSlashResult
+        return snapshot().copy(phase = phase)
     }
 
     private fun snapshot(): GameState = GameState(
+        frameCount = frameCount++,
         tiles = tiles.filter { it.state != TileState.DEAD }.toList(),
         shatterEffects = shatterEffects.toList(),
         slashTrails = slashTrails.toList(),
@@ -659,24 +708,42 @@ class GameEngine {
         score = score,
         combo = combo,
         bladeHealth = bladeHealth,
-        phase = if (bladeHealth <= 0) GamePhase.GAME_OVER else GamePhase.PLAYING,
+        phase = when {
+            gameOverAnimPhase -> GamePhase.GAME_OVER_ANIM
+            bladeHealth <= 0 -> GamePhase.GAME_OVER
+            else -> GamePhase.PLAYING
+        },
         screenWidth = screenW,
         screenHeight = screenH,
         flashAlpha = flashAlpha,
         flashColor = flashColor,
-        debugLastSlash = debugLastSlash,
-        debugLastPath = debugLastPath,
-        debugDensity = density,
-        debugAutoSlash = autoSlashResult,
+        shakeOffsetX = shakeOffsetX,
+        shakeOffsetY = shakeOffsetY,
+        hintTileIds = hintTileIds,
+        tilesCleared = tilesCleared,
+        maxCombo = maxCombo,
+        totalSlashes = totalSlashes,
+        validSlashes = validSlashes,
     )
+}
+
+private fun comboEscalationLabel(combo: Int): String? = when {
+    combo == 3 -> "GREAT"
+    combo == 4 -> "AMAZING"
+    combo == 5 -> "INCREDIBLE"
+    combo >= 6 -> "GODLIKE"
+    else -> null
+}
+
+private fun comboEscalationScale(combo: Int): Float = when {
+    combo == 3 -> 1.0f
+    combo == 4 -> 1.3f
+    combo == 5 -> 1.6f
+    combo >= 6 -> 2.0f
+    else -> 1.0f
 }
 
 data class MatchResult(
     val tiles: List<Tile>,
     val baseScore: Int,
-    val type: MatchType,
 )
-
-enum class MatchType {
-    PAIR, SEQUENCE, TRIPLET
-}

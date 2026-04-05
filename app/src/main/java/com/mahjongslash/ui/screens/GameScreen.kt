@@ -1,6 +1,5 @@
 package com.mahjongslash.ui.screens
 
-import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,24 +19,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.withFrameNanos
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mahjongslash.game.engine.FloatingText
 import com.mahjongslash.game.engine.GamePhase
@@ -50,11 +47,14 @@ import com.mahjongslash.viewmodel.GameViewModel
 
 @Composable
 fun GameScreen(
-    viewModel: GameViewModel = viewModel()
+    viewModel: GameViewModel = viewModel(),
+    onGameOver: (score: Int, tilesCleared: Int, maxCombo: Int, totalSlashes: Int, validSlashes: Int) -> Unit = { _, _, _, _, _ -> },
 ) {
     val state by viewModel.state.collectAsState()
     val density = LocalDensity.current.density
     val textMeasurer = rememberTextMeasurer()
+    val view = LocalView.current
+    viewModel.hapticView = view
 
     // Game loop — runs every frame
     LaunchedEffect(Unit) {
@@ -102,71 +102,77 @@ fun GameScreen(
                     )
                 }
         ) {
-            // Draw rice paper grain texture
-            drawBackground()
-
-            // Draw slash trails (behind tiles)
-            for (trail in state.slashTrails) {
-                drawSlashTrail(trail)
+            // Draw background outside shake (stays stable)
+            val bgBitmap = viewModel.bgRenderer?.cachedBackground
+            if (bgBitmap != null) {
+                drawImage(bgBitmap)
+            } else {
+                drawRect(BackgroundDark)
             }
 
-            // Draw live tiles
-            for (tile in state.tiles) {
-                drawTile(tile, textMeasurer)
-            }
-
-            // DEBUG: Draw tile hitbox outlines (temporary — remove after validation)
-            val dbgDensity = state.debugDensity
-            for (tile in state.tiles) {
-                val hb = tile.hitBounds(dbgDensity)
-                drawRect(
-                    color = Color.Cyan.copy(alpha = 0.4f),
-                    topLeft = Offset(hb.left, hb.top),
-                    size = androidx.compose.ui.geometry.Size(hb.width, hb.height),
-                    style = Stroke(width = 2f)
-                )
-                // Tile center marker
-                drawCircle(
-                    color = Color.Cyan.copy(alpha = 0.7f),
-                    radius = 4f,
-                    center = tile.position,
-                )
-            }
-
-            // DEBUG: Draw last swipe path (temporary — remove after validation)
-            if (state.debugLastPath.size >= 2) {
-                for (i in 0 until state.debugLastPath.size - 1) {
-                    drawLine(
-                        color = Color.Yellow.copy(alpha = 0.8f),
-                        start = state.debugLastPath[i],
-                        end = state.debugLastPath[i + 1],
-                        strokeWidth = 3f,
-                    )
+            // Apply screen shake offset to all game elements
+            translate(left = state.shakeOffsetX, top = state.shakeOffsetY) {
+                // Draw slash trails (behind tiles)
+                for (trail in state.slashTrails) {
+                    drawSlashTrail(trail)
                 }
-                // Mark start and end points
-                drawCircle(
-                    color = Color.Green,
-                    radius = 8f,
-                    center = state.debugLastPath.first(),
+
+                // Draw hint glow behind hinted tiles
+                if (state.hintTileIds.isNotEmpty()) {
+                    for (tile in state.tiles) {
+                        if (tile.instanceId in state.hintTileIds) {
+                            val w = com.mahjongslash.game.model.Tile.WIDTH_DP * density
+                            val h = com.mahjongslash.game.model.Tile.HEIGHT_DP * density
+                            val glowPad = 8f * density
+                            drawRoundRect(
+                                color = AccentGold.copy(alpha = 0.4f),
+                                topLeft = Offset(
+                                    tile.position.x - w / 2f - glowPad,
+                                    tile.position.y - h / 2f - glowPad
+                                ),
+                                size = androidx.compose.ui.geometry.Size(w + glowPad * 2, h + glowPad * 2),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * density),
+                            )
+                        }
+                    }
+                }
+
+                // Draw live tiles
+                for (tile in state.tiles) {
+                    drawTile(tile)
+                }
+
+                // Draw shatter effects (on top of tiles)
+                for (effect in state.shatterEffects) {
+                    drawShatterEffect(effect)
+                }
+
+                // Draw floating score/feedback texts
+                for (ft in state.floatingTexts) {
+                    drawFloatingText(ft, textMeasurer)
+                }
+            }
+
+            // Danger vignette — intensifies as blade health drops
+            val maxHealth = 3
+            if (state.bladeHealth < maxHealth) {
+                val intensity = 1f - (state.bladeHealth.toFloat() / maxHealth)
+                val vignetteAlpha = intensity * 0.6f // max 60% opacity at 0 health
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val radius = maxOf(size.width, size.height) * 0.7f
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            androidx.compose.ui.graphics.Color.Transparent,
+                            AccentRed.copy(alpha = vignetteAlpha),
+                        ),
+                        center = center,
+                        radius = radius,
+                    ),
                 )
-                drawCircle(
-                    color = Color.Red,
-                    radius = 8f,
-                    center = state.debugLastPath.last(),
-                )
             }
 
-            // Draw shatter effects (on top of tiles)
-            for (effect in state.shatterEffects) {
-                drawShatterEffect(effect)
-            }
-
-            // Draw floating score/feedback texts
-            for (ft in state.floatingTexts) {
-                drawFloatingText(ft, textMeasurer)
-            }
-
-            // Draw screen flash overlay
+            // Draw screen flash overlay (outside shake — full screen)
             if (state.flashAlpha > 0f) {
                 drawRect(
                     color = state.flashColor.copy(alpha = state.flashAlpha),
@@ -175,130 +181,32 @@ fun GameScreen(
         }
 
         // HUD overlay
-        GameHud(state = state, modifier = Modifier.statusBarsPadding())
+        GameHud(
+            state = state,
+            onPause = { viewModel.pause() },
+            modifier = Modifier.statusBarsPadding()
+        )
 
-        // Debug overlay (temporary — remove after validation)
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(8.dp)
-        ) {
-            if (state.debugAutoSlash.isNotEmpty()) {
-                Text(
-                    text = state.debugAutoSlash,
-                    style = TextStyle(
-                        color = AccentGold.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal,
-                    ),
-                )
-            }
-            if (state.debugLastSlash.isNotEmpty()) {
-                Text(
-                    text = state.debugLastSlash,
-                    style = TextStyle(
-                        color = WarmWhite.copy(alpha = 0.5f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal,
-                    ),
-                )
-            }
+        // Pause overlay
+        if (state.phase == GamePhase.PAUSED) {
+            PauseOverlay(
+                onResume = { viewModel.resume() },
+                onRestart = { viewModel.restart(state.screenWidth, state.screenHeight, density) }
+            )
         }
 
-        // Auto-slash debug button (temporary — remove after validation)
-        if (state.phase == GamePhase.PLAYING) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-                    .zIndex(100f)
-                    .size(width = 96.dp, height = 56.dp)
-                    .clickable {
-                        Log.d("MahjongSlash", "AUTO button tapped")
-                        val result = viewModel.triggerAutoSlash()
-                        Log.d("MahjongSlash", "AUTO result: $result")
-                    }
-                    .background(AccentRed.copy(alpha = 0.85f))
-            ) {
-                Text(
-                    text = "⚡AUTO",
-                    style = TextStyle(
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black,
-                    ),
-                )
-            }
-
-            // Auto-trigger on launch: retries every second until a match succeeds
-            LaunchedEffect(Unit) {
-                delay(2000L) // initial wait for tiles to spawn
-                for (attempt in 1..15) {
-                    val result = viewModel.triggerAutoSlash()
-                    Log.d("MahjongSlash", "AUTO attempt=$attempt result=$result")
-                    if (result.startsWith("AUTO OK")) break
-                    delay(1000L)
-                }
-            }
-        }
-
-        // Unmistakable debug banner at top-center (temporary — remove after validation)
-        if (state.debugAutoSlash.isNotEmpty()) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 48.dp)
-                    .zIndex(200f)
-                    .background(
-                        if (state.debugAutoSlash.startsWith("AUTO OK"))
-                            Color(0xFF00AA00).copy(alpha = 0.9f)
-                        else
-                            Color(0xFFAA6600).copy(alpha = 0.9f)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = state.debugAutoSlash,
-                    style = TextStyle(
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                )
-            }
-        }
-
-        // Game over overlay
+        // Navigate to game over screen
         if (state.phase == GamePhase.GAME_OVER) {
-            GameOverOverlay(
-                score = state.score,
-                onRestart = {
-                    viewModel.restart(state.screenWidth, state.screenHeight, density)
-                }
-            )
+            LaunchedEffect(Unit) {
+                onGameOver(
+                    state.score,
+                    state.tilesCleared,
+                    state.maxCombo,
+                    state.totalSlashes,
+                    state.validSlashes,
+                )
+            }
         }
-    }
-}
-
-private fun DrawScope.drawBackground() {
-    drawRect(BackgroundDark)
-
-    val grainColor = TileIvory.copy(alpha = 0.015f)
-    val step = 12f * density
-    var y = 0f
-    while (y < size.height) {
-        var x = 0f
-        while (x < size.width) {
-            drawCircle(
-                color = grainColor,
-                radius = 0.5f * density,
-                center = Offset(x, y)
-            )
-            x += step
-        }
-        y += step
     }
 }
 
@@ -308,9 +216,10 @@ private fun DrawScope.drawFloatingText(
 ) {
     if (ft.alpha <= 0f) return
 
+    val scaledSize = 28.sp * ft.currentScale
     val style = TextStyle(
         color = ft.color.copy(alpha = ft.alpha),
-        fontSize = 28.sp,
+        fontSize = scaledSize,
         fontWeight = FontWeight.Black,
         letterSpacing = 1.sp,
     )
@@ -326,7 +235,7 @@ private fun DrawScope.drawFloatingText(
 }
 
 @Composable
-private fun GameHud(state: GameState, modifier: Modifier = Modifier) {
+private fun GameHud(state: GameState, onPause: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().padding(16.dp)) {
         // Top-left: Score + Combo
         Column(modifier = Modifier.align(Alignment.TopStart)) {
@@ -351,9 +260,12 @@ private fun GameHud(state: GameState, modifier: Modifier = Modifier) {
             }
         }
 
-        // Top-right: Blade health (drawn as small tile shapes)
-        Row(modifier = Modifier.align(Alignment.TopEnd)) {
-            for (i in 0 until 5) {
+        // Top-right: Blade health + Pause button
+        Row(
+            modifier = Modifier.align(Alignment.TopEnd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (i in 0 until 3) {
                 val isAlive = i < state.bladeHealth
                 Canvas(
                     modifier = Modifier
@@ -375,63 +287,94 @@ private fun GameHud(state: GameState, modifier: Modifier = Modifier) {
                     }
                 }
             }
+
+            // Pause button — red seal stamp 止
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(36.dp)
+                    .background(AccentRed.copy(alpha = 0.85f), shape = androidx.compose.foundation.shape.CircleShape)
+                    .clickable { onPause() }
+            ) {
+                Text(
+                    text = "止",
+                    style = TextStyle(
+                        color = WarmWhite,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                    ),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun GameOverOverlay(score: Int, onRestart: () -> Unit) {
+private fun PauseOverlay(onResume: () -> Unit, onRestart: () -> Unit, onMenu: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundDark.copy(alpha = 0.85f))
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.changes.any { it.pressed }) {
-                            onRestart()
-                        }
-                    }
-                }
-            },
+            .background(BackgroundDark.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "終",
+                text = "暫停",
                 style = TextStyle(
-                    color = AccentRed,
-                    fontSize = 72.sp,
-                    fontWeight = FontWeight.Black,
-                ),
-            )
-            Text(
-                text = "GAME OVER",
-                style = TextStyle(
-                    color = WarmWhite.copy(alpha = 0.6f),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 4.sp,
-                ),
-            )
-            Text(
-                text = "$score",
-                style = TextStyle(
-                    color = AccentGold,
+                    color = WarmWhite,
                     fontSize = 48.sp,
                     fontWeight = FontWeight.Black,
                 ),
-                modifier = Modifier.padding(top = 24.dp)
             )
             Text(
-                text = "tap to play again",
+                text = "PAUSED",
                 style = TextStyle(
-                    color = WarmWhite.copy(alpha = 0.3f),
+                    color = WarmWhite.copy(alpha = 0.5f),
                     fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 4.sp,
                 ),
-                modifier = Modifier.padding(top = 32.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
+
+            // Resume button
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .padding(top = 40.dp)
+                    .background(TileIvory, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .clickable { onResume() }
+                    .padding(horizontal = 32.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "續 RESUME",
+                    style = TextStyle(
+                        color = BackgroundDark,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
+
+            // Restart button
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .padding(top = 16.dp)
+                    .background(AccentRed.copy(alpha = 0.8f), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .clickable { onRestart() }
+                    .padding(horizontal = 32.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "再 RESTART",
+                    style = TextStyle(
+                        color = WarmWhite,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
         }
     }
 }
