@@ -49,6 +49,7 @@ import com.mahjongslash.viewmodel.GameViewModel
 @Composable
 fun GameScreen(
     viewModel: GameViewModel = viewModel(),
+    showPauseOverlay: Boolean = true,
     onGameOver: (score: Int, tilesCleared: Int, maxCombo: Int, totalSlashes: Int, validSlashes: Int) -> Unit = { _, _, _, _, _ -> },
 ) {
     val state by viewModel.state.collectAsState()
@@ -179,8 +180,8 @@ fun GameScreen(
             modifier = Modifier.statusBarsPadding()
         )
 
-        // Pause overlay
-        if (state.phase == GamePhase.PAUSED) {
+        // Pause overlay (hidden during tutorial)
+        if (state.phase == GamePhase.PAUSED && showPauseOverlay) {
             PauseOverlay(
                 onResume = { viewModel.resume() },
                 onRestart = { viewModel.restart(state.screenWidth, state.screenHeight, density) }

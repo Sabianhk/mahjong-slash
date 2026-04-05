@@ -24,8 +24,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.mahjongslash.data.PreferencesManager
 import com.mahjongslash.game.audio.AudioManager
+import com.mahjongslash.ui.components.TutorialOverlay
 import com.mahjongslash.ui.screens.*
 import com.mahjongslash.ui.theme.MahjongSlashTheme
 import com.mahjongslash.game.engine.MemoryDifficulty
@@ -130,8 +135,21 @@ class MainActivity : ComponentActivity() {
                         exitTransition = { fadeOut(tween(400)) },
                     ) {
                         val gameViewModel: GameViewModel = viewModel()
+                        val hasSeen by preferencesManager.hasSeenTutorial
+                            .collectAsState(initial = true) // default true to avoid flash
+                        var showTutorial by remember { mutableStateOf(false) }
+
+                        // Show tutorial if first time (once hasSeen loads as false)
+                        LaunchedEffect(hasSeen) {
+                            if (!hasSeen) {
+                                showTutorial = true
+                                gameViewModel.pause()
+                            }
+                        }
+
                         GameScreen(
                             viewModel = gameViewModel,
+                            showPauseOverlay = !showTutorial,
                             onGameOver = { score, tilesCleared, maxCombo, totalSlashes, validSlashes ->
                                 // Save score
                                 CoroutineScope(Dispatchers.IO).launch {
@@ -145,6 +163,18 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         )
+
+                        if (showTutorial) {
+                            TutorialOverlay(
+                                onDismiss = {
+                                    showTutorial = false
+                                    gameViewModel.resume()
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        preferencesManager.setTutorialSeen()
+                                    }
+                                }
+                            )
+                        }
                     }
 
                     composable(

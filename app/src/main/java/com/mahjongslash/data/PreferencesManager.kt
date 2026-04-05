@@ -22,12 +22,15 @@ class PreferencesManager(private val context: Context) {
         private val KEY_LAST_SCORE = intPreferencesKey("last_score")
         // Store top 10 scores as comma-separated string
         private val KEY_HIGH_SCORES = stringPreferencesKey("high_scores")
+        private val KEY_HAS_SEEN_TUTORIAL = booleanPreferencesKey("has_seen_tutorial")
     }
 
     val soundEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_SOUND] ?: true }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_HAPTICS] ?: true }
     val leftHanded: Flow<Boolean> = context.dataStore.data.map { it[KEY_LEFT_HANDED] ?: false }
     val lastScore: Flow<Int> = context.dataStore.data.map { it[KEY_LAST_SCORE] ?: 0 }
+
+    val hasSeenTutorial: Flow<Boolean> = context.dataStore.data.map { it[KEY_HAS_SEEN_TUTORIAL] ?: false }
 
     val highScores: Flow<List<Int>> = context.dataStore.data.map { prefs ->
         val raw = prefs[KEY_HIGH_SCORES] ?: ""
@@ -45,6 +48,10 @@ class PreferencesManager(private val context: Context) {
 
     suspend fun setLeftHanded(leftHanded: Boolean) {
         context.dataStore.edit { it[KEY_LEFT_HANDED] = leftHanded }
+    }
+
+    suspend fun setTutorialSeen() {
+        context.dataStore.edit { it[KEY_HAS_SEEN_TUTORIAL] = true }
     }
 
     suspend fun saveScore(score: Int) {
